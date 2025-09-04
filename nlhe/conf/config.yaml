@@ -1,6 +1,6 @@
 train_settings:
   algo: PPO
-  epochs: 325
+  epochs: 150
   batch_size: 2048
   num_mini_batches: 2048
   learning_rate: 3e-4
@@ -27,10 +27,49 @@ env_settings:
   starting_stack: 100
   history_length: 64
 
+
+eval_settings:
+  interval: 2            # evaluate every 2 train() calls
+  num_episodes: 64       # episodes per evaluation
+  deterministic: false    # explore=False during eval
+  seed: 424242           # fixed seed for reproducibility
+  parallel: false        # run eval after training step (no lag)
+  num_env_runners: 1     # single runner for strict repeatability
+
 log_settings:
+  tensorboard:
+    log_dir: ./tb_logs
+    # If you want to override/limit the whitelist explicitly:
+    allow:
+      - "env_runners/episode_return_mean"
+      - "env_runners/episode_return_max"
+      - "env_runners/episode_return_min"
+      - "env_runners/episode_len_mean"
+      - "env_runners/episode_len_max"
+      - "env_runners/episode_len_min"
+      - "learners/default_policy/mean_kl_loss"
+      - "learners/default_policy/policy_loss"
+      - "learners/default_policy/vf_loss"
+      - "learners/default_policy/vf_loss_unclipped"
+      - "learners/default_policy/total_loss"
+      - "evaluation/env_runners/episode_return_max"
+      - "evaluation/env_runners/episode_return_mean"
+      - "evaluation/env_runners/episode_return_min"
+
+    tag_map:
+      "env_runners/episode_return_mean": "train/return_mean"
+      "evaluation/env_runners/episode_return_mean": "eval/return_mean"
+      "learners/default_policy/policy_loss": "loss/policy"
+      "learners/default_policy/vf_loss": "loss/vf"
+      "learners/default_policy/vf_loss_unclipped": "loss/vf_unclipped"
+      "learners/default_policy/total_loss": "loss/total"
+      "learners/default_policy/mean_kl_loss": "loss/mean_kl"
+      "evaluation/return_mean": "eval/return_mean"
+      "evaluation/return_max": "eval/return_max"
+      "evaluation/return_min": "eval/return_min"
+      "env_runners/episode_return_max": "train/return_max"
+      "env_runners/episode_return_min": "train/return_min"
   checkpointing:
     save_dir: ./checkpoints
     save_freq: 2
     max_to_keep: 5
-  tensorboard:
-    log_dir: ./tb_logs

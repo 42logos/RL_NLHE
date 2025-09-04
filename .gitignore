@@ -18,6 +18,7 @@ trainlogsPPO/
 outputs/
 results.txt
 eval_out/
+multirun/
 # nlhe_eval release files
 nlhe/nlhe_eval/release/
 nlhe/nlhe_eval/target/

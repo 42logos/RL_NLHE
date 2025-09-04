@@ -56,4 +56,12 @@ def suit_of(c: int) -> int:
     return _CARD_SUIT[c]
 
 def make_deck() -> List[int]:
+    """
+    Create a standard 52-card deck represented as a list of integers.
+    
+    Returns:
+        List[int]: A list containing integers from 0 to 51, where each integer
+                   represents a unique playing card in the deck.
+    """
+    
     return list(range(52))
