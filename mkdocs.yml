@@ -1,0 +1,52 @@
+site_name: NLHE Docs
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - toc.follow
+    - content.code.copy
+  language: zh
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.details
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          # 关键：把“项目根”（mkdocs.yml 所在目录）加入解析路径
+          paths: ["."]
+          options:
+            docstring_style: google
+            show_root_heading: true
+            show_signature: true
+            separate_signature: true
+            merge_init_into_class: true
+            show_source: true
+            inherited_members: true
+            members_order: source
+            filters:
+              - "!^_"
+              - "!__init__"
+
+# 可选：改成你喜欢的导航
+nav:
+  - 首页: ../README.md
+  - API 参考:
+      - nlhe: api/nlhe.md
+      - core: api/core.md
+      - envs: api/envs.md
+      - train: api/train.md
+
+# 让热重载也监听源码目录（可选）
+watch:
+  - nlhe
+  - docs
+  - mkdocs.yml

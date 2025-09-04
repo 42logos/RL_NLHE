@@ -1,0 +1,36 @@
+train_settings:
+  algo: PPO
+  epochs: 325
+  batch_size: 2048
+  num_mini_batches: 2048
+  learning_rate: 3e-4
+  num_epochs: 10
+  clip_grad_norm: 77
+  gamma: 0.8
+  shuffle_batches: true
+
+network_settings: 
+  fc_hidden_sizes: [256, 256]
+  fc_activation: relu
+  head_hidden_sizes: [128]
+  head_activation: relu
+  use_lstm: false
+  lstm_hidden_size: 128
+  free_log_std: false
+
+env_settings:
+  name: nlhe
+  hero_seat: 1
+  bb: 2
+  sb: 1
+  seed: 42
+  starting_stack: 100
+  history_length: 64
+
+log_settings:
+  checkpointing:
+    save_dir: ./checkpoints
+    save_freq: 2
+    max_to_keep: 5
+  tensorboard:
+    log_dir: ./tb_logs

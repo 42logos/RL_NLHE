@@ -1,0 +1,23 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+#checkpoints and logs
+checkpoints/
+logs/
+checkpointsPro/
+tb_logs/
+trainlogsPPO/
+outputs/
+results.txt
+eval_out/
+# nlhe_eval release files
+nlhe/nlhe_eval/release/
+nlhe/nlhe_eval/target/
