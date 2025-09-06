@@ -117,7 +117,7 @@ def best5_rank_from_7(cards7: Tuple[int, int, int, int, int, int, int]) -> Tuple
     return (-1, ())
 
 try:
-    import nlhe_eval as _nlhe
+    import nlhe_engine as _nlhe  # <- this module now exposes best5_rank_from_7_py
     def best5_rank_from_7(cards7: Tuple[int, int, int, int, int, int, int]) -> Tuple[int, Tuple[int, ...]]:
         """
         Evaluate the best 5-card poker hand from 7 given cards and return its rank.

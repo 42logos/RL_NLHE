@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyList, PyTuple};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 // ==============================
 // Card utilities (0..=51)
@@ -338,10 +338,13 @@ impl StepDiff {
 }
 
 // ==============================
-// Hand evaluation
+// Fast 7-card hand evaluation
 // ==============================
+
+/// Hand categories (match your Python constants)
+#[repr(i32)]
 #[derive(Copy, Clone, Eq, PartialEq)]
-enum HandCategory {
+enum HandCat {
     High = 0,
     OnePair = 1,
     TwoPair = 2,
@@ -349,206 +352,340 @@ enum HandCategory {
     Straight = 4,
     Flush = 5,
     FullHouse = 6,
-    Four = 7,
+    Quads = 7,
     StraightFlush = 8,
 }
 
-#[derive(Clone, Eq, PartialEq)]
-struct HandRank {
-    cat: i32,
-    tiebreak: Vec<i32>,
-}
+#[inline(always)]
+fn rank_idx(card: i32) -> usize { (card % 13) as usize } // 0..12 = 2..A
+#[inline(always)]
+fn suit_idx(card: i32) -> usize { (card / 13) as usize } // 0..3
 
-impl Ord for HandRank {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match self.cat.cmp(&other.cat) {
-            Ordering::Equal => self.tiebreak.cmp(&other.tiebreak),
-            o => o,
-        }
-    }
-}
-impl PartialOrd for HandRank {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-fn ranks_of(cards5: &[u8]) -> Vec<i32> {
-    let mut v: Vec<i32> = cards5.iter().map(|&c| 2 + (c as i32 % 13)).collect();
-    v.sort_by(|a, b| b.cmp(a));
-    v
-}
-fn suits_of(cards5: &[u8]) -> Vec<i32> {
-    cards5.iter().map(|&c| (c / 13) as i32).collect()
-}
-
-fn straight_high(mut uniq: Vec<i32>) -> Option<i32> {
-    uniq.sort_by(|a, b| b.cmp(a));
-    let set: HashSet<i32> = uniq.iter().cloned().collect();
-    if [14, 5, 4, 3, 2].iter().all(|x| set.contains(x)) {
+// Find straight high card from a 13-bit rank mask (bits 0..12 represent ranks 2..A)
+#[inline(always)]
+fn straight_high(mask: u16) -> Option<i32> {
+    // Wheel: A-2-3-4-5 (bits {0..3} and bit 12)
+    if (mask & 0b0001_1111) == 0b0001_1111 && (mask & (1 << 12)) != 0 {
         return Some(5);
     }
-    if uniq.len() < 5 {
-        return None;
-    }
-    for i in 0..=uniq.len() - 5 {
-        let w = &uniq[i..i + 5];
-        let diff = w[0] - w[4];
-        let mut h = HashSet::new();
-        let all_distinct = w.iter().all(|x| h.insert(*x));
-        if diff == 4 && all_distinct {
-            return Some(w[0]);
+    // Any 5 consecutive ranks (2..6 up to 10..A)
+    let m = mask;
+    // check windows of size 5: [0..4], [1..5], ... [8..12]
+    for hi in (4..=12).rev() {
+        let window = ((m >> (hi - 4)) & 0b1_1111) as u16;
+        if window == 0b1_1111 {
+            return Some((hi as i32) + 2); // hi index 0=2, so +2
         }
     }
     None
 }
 
-fn hand_rank_5(cards5: &[u8; 5]) -> HandRank {
-    let ranks = ranks_of(cards5);
-    let suits = suits_of(cards5);
-
-    let mut cnt: HashMap<i32, i32> = HashMap::new();
-    for r in &ranks {
-        *cnt.entry(*r).or_insert(0) += 1;
-    }
-    let mut bycnt: Vec<(i32, i32)> = cnt.into_iter().collect();
-    bycnt.sort_by(|a, b| (b.1, b.0).cmp(&(a.1, a.0)));
-
-    let is_flush = {
-        let mut s = HashSet::new();
-        for v in suits {
-            s.insert(v);
+#[inline(always)]
+fn top_k_from_mask(mask: u16, k: usize, out: &mut [i32; 5]) {
+    let mut idx = 0;
+    for r in (0..13).rev() {
+        if (mask & (1 << r)) != 0 {
+            out[idx] = (r as i32) + 2;
+            idx += 1;
+            if idx == k { break; }
         }
-        s.len() == 1
-    };
-    let mut uniq: Vec<i32> = ranks.clone();
-    uniq.dedup();
-
-    let s_high = straight_high(uniq.clone());
-
-    if is_flush && s_high.is_some() {
-        return HandRank {
-            cat: HandCategory::StraightFlush as i32,
-            tiebreak: vec![s_high.unwrap()],
-        };
     }
-    if bycnt[0].1 == 4 {
-        let quad = bycnt[0].0;
-        let kicker = ranks.iter().cloned().filter(|r| *r != quad).max().unwrap();
-        return HandRank {
-            cat: HandCategory::Four as i32,
-            tiebreak: vec![quad, kicker],
-        };
-    }
-    if bycnt[0].1 == 3 && bycnt[1].1 == 2 {
-        let trips = bycnt[0].0;
-        let pair = bycnt[1].0;
-        return HandRank {
-            cat: HandCategory::FullHouse as i32,
-            tiebreak: vec![trips, pair],
-        };
-    }
-    if is_flush {
-        return HandRank {
-            cat: HandCategory::Flush as i32,
-            tiebreak: ranks.clone(),
-        };
-    }
-    if let Some(h) = s_high {
-        return HandRank {
-            cat: HandCategory::Straight as i32,
-            tiebreak: vec![h],
-        };
-    }
-    if bycnt[0].1 == 3 {
-        let trips = bycnt[0].0;
-        let kickers: Vec<i32> = ranks.iter().cloned().filter(|r| *r != trips).take(2).collect();
-        return HandRank {
-            cat: HandCategory::Trips as i32,
-            tiebreak: [vec![trips], kickers].concat(),
-        };
-    }
-    if bycnt[0].1 == 2 && bycnt[1].1 == 2 {
-        let hp = bycnt[0].0.max(bycnt[1].0);
-        let lp = bycnt[0].0.min(bycnt[1].0);
-        let kicker = ranks
-            .iter()
-            .cloned()
-            .filter(|r| *r != hp && *r != lp)
-            .max()
-            .unwrap();
-        return HandRank {
-            cat: HandCategory::TwoPair as i32,
-            tiebreak: vec![hp, lp, kicker],
-        };
-    }
-    if bycnt[0].1 == 2 {
-        let pair = bycnt[0].0;
-        let kickers: Vec<i32> = ranks.iter().cloned().filter(|r| *r != pair).take(3).collect();
-        return HandRank {
-            cat: HandCategory::OnePair as i32,
-            tiebreak: [vec![pair], kickers].concat(),
-        };
-    }
-    HandRank {
-        cat: HandCategory::High as i32,
-        tiebreak: ranks,
+    // zero-pad if needed
+    while idx < k {
+        out[idx] = 0;
+        idx += 1;
     }
 }
 
-fn best5_rank_from_7_rust(cards7: &[u8; 7]) -> (i32, Vec<i32>) {
-    let idxs = [
-        [0, 1, 2, 3, 4],
-        [0, 1, 2, 3, 5],
-        [0, 1, 2, 3, 6],
-        [0, 1, 2, 4, 5],
-        [0, 1, 2, 4, 6],
-        [0, 1, 2, 5, 6],
-        [0, 1, 3, 4, 5],
-        [0, 1, 3, 4, 6],
-        [0, 1, 3, 5, 6],
-        [0, 1, 4, 5, 6],
-        [0, 2, 3, 4, 5],
-        [0, 2, 3, 4, 6],
-        [0, 2, 3, 5, 6],
-        [0, 2, 4, 5, 6],
-        [0, 3, 4, 5, 6],
-        [1, 2, 3, 4, 5],
-        [1, 2, 3, 4, 6],
-        [1, 2, 3, 5, 6],
-        [1, 2, 4, 5, 6],
-        [1, 3, 4, 5, 6],
-        [2, 3, 4, 5, 6],
-    ];
-    let mut best = HandRank {
-        cat: -1,
-        tiebreak: vec![],
-    };
-    for comb in idxs {
-        let hand = [
-            cards7[comb[0]],
-            cards7[comb[1]],
-            cards7[comb[2]],
-            cards7[comb[3]],
-            cards7[comb[4]],
-        ];
-        let r = hand_rank_5(&hand);
-        if r > best {
-            best = r;
+/// Internal Rust-only version that returns Vec<i32> for tiebreakers
+fn best5_rank_from_7_rust(cards7: &[i32; 7]) -> (i32, Vec<i32>) {
+    // 4 suit masks, 13 rank counts
+    let mut suit_masks: [u16; 4] = [0; 4];
+    let mut rc: [u8; 13] = [0; 13];
+
+    for &c in cards7 {
+        let r = rank_idx(c);
+        let s = suit_idx(c);
+        suit_masks[s] |= 1 << r;
+        rc[r] += 1;
+    }
+
+    // overall rank mask
+    let mut all_mask: u16 = 0;
+    for r in 0..13 {
+        if rc[r] > 0 { all_mask |= 1 << r; }
+    }
+
+    // Flush / Straight Flush?
+    let mut flush_suit: Option<usize> = None;
+    for s in 0..4 {
+        if suit_masks[s].count_ones() >= 5 {
+            flush_suit = Some(s);
+            break;
         }
     }
-    (best.cat, best.tiebreak)
+
+    // Straight Flush?
+    if let Some(s) = flush_suit {
+        if let Some(sh) = straight_high(suit_masks[s]) {
+            return (HandCat::StraightFlush as i32, vec![sh]);
+        }
+    }
+
+    // Rank multiplicities, collect (count, rank) pairs on stack
+    let mut four: Option<i32> = None;
+    let mut trips: [i32; 2] = [0; 2]; let mut n_trips = 0;
+    let mut pairs: [i32; 3] = [0; 3]; let mut n_pairs = 0;
+    let mut highs: [i32; 5] = [0; 5]; let mut n_highs = 0;
+
+    for r in (0..13).rev() {
+        match rc[r] {
+            4 => { four = Some((r as i32) + 2); }
+            3 => {
+                if n_trips < 2 { trips[n_trips] = (r as i32) + 2; n_trips += 1; }
+            }
+            2 => {
+                if n_pairs < 3 { pairs[n_pairs] = (r as i32) + 2; n_pairs += 1; }
+            }
+            1 => {
+                if n_highs < 5 { highs[n_highs] = (r as i32) + 2; n_highs += 1; }
+            }
+            _ => {}
+        }
+    }
+
+    // Quads?
+    if let Some(q) = four {
+        let mut kicker = 0;
+        for r in (0..13).rev() {
+            let rv = (r as i32) + 2;
+            if rv != q && rc[r] > 0 { kicker = rv; break; }
+        }
+        return (HandCat::Quads as i32, vec![q, kicker]);
+    }
+
+    // Full House?
+    if n_trips >= 1 && (n_pairs >= 1 || n_trips >= 2) {
+        let t = trips[0];
+        let p = if n_pairs >= 1 { pairs[0] } else { trips[1] };
+        return (HandCat::FullHouse as i32, vec![t, p]);
+    }
+
+    // Flush?
+    if let Some(s) = flush_suit {
+        let mut top5 = [0; 5];
+        top_k_from_mask(suit_masks[s], 5, &mut top5);
+        return (HandCat::Flush as i32, top5.to_vec());
+    }
+
+    // Straight?
+    if let Some(sh) = straight_high(all_mask) {
+        return (HandCat::Straight as i32, vec![sh]);
+    }
+
+    // Trips?
+    if n_trips >= 1 {
+        let t = trips[0];
+        let mut kick = [0; 2]; let mut k = 0;
+        for r in (0..13).rev() {
+            let rv = (r as i32) + 2;
+            if rc[r] > 0 && rv != t {
+                kick[k] = rv; k += 1;
+                if k == 2 { break; }
+            }
+        }
+        return (HandCat::Trips as i32, vec![t, kick[0], kick[1]]);
+    }
+
+    // Two Pair?
+    if n_pairs >= 2 {
+        let hp = pairs[0]; let lp = pairs[1];
+        let mut kicker = 0;
+        for r in (0..13).rev() {
+            let rv = (r as i32) + 2;
+            if rc[r] > 0 && rv != hp && rv != lp { kicker = rv; break; }
+        }
+        return (HandCat::TwoPair as i32, vec![hp, lp, kicker]);
+    }
+
+    // One Pair?
+    if n_pairs == 1 {
+        let p = pairs[0];
+        let mut k = [0; 3]; let mut i = 0;
+        for r in (0..13).rev() {
+            let rv = (r as i32) + 2;
+            if rc[r] > 0 && rv != p {
+                k[i] = rv; i += 1;
+                if i == 3 { break; }
+            }
+        }
+        return (HandCat::OnePair as i32, vec![p, k[0], k[1], k[2]]);
+    }
+
+    // High card: top 5 ranks
+    let mut top5 = [0; 5];
+    top_k_from_mask(all_mask, 5, &mut top5);
+    (HandCat::High as i32, top5.to_vec())
 }
 
-/// Python-friendly entry (parity with your eval.py)
+/// Return (category, tiebreakers as PyTuple) – tiebreak semantics match your Python.
+/// cards: exactly 7 ints in 0..51
 #[pyfunction]
-fn best5_rank_from_7_py(cards7: Vec<u8>) -> PyResult<(i32, Vec<i32>)> {
-    if cards7.len() != 7 {
-        return Err(PyValueError::new_err("cards7 must have length 7"));
+fn best5_rank_from_7_py<'py>(py: Python<'py>, cards: Vec<i32>) -> PyResult<(i32, Bound<'py, PyTuple>)> {
+    assert!(cards.len() == 7, "need 7 cards");
+    // 4 suit masks, 13 rank counts
+    let mut suit_masks: [u16; 4] = [0; 4];
+    let mut rc: [u8; 13] = [0; 13];
+
+    for &c in &cards {
+        let r = rank_idx(c);
+        let s = suit_idx(c);
+        suit_masks[s] |= 1 << r;
+        rc[r] += 1;
     }
-    let mut a = [0u8; 7];
-    a.copy_from_slice(&cards7);
-    Ok(best5_rank_from_7_rust(&a))
+
+    // overall rank mask
+    let mut all_mask: u16 = 0;
+    for r in 0..13 {
+        if rc[r] > 0 { all_mask |= 1 << r; }
+    }
+
+    // Flush / Straight Flush?
+    let mut flush_suit: Option<usize> = None;
+    for s in 0..4 {
+        if suit_masks[s].count_ones() >= 5 {
+            flush_suit = Some(s);
+            break;
+        }
+    }
+
+    // Straight Flush?
+    if let Some(s) = flush_suit {
+        if let Some(sh) = straight_high(suit_masks[s]) {
+            // Straight Flush: (sh,)
+            let tb = PyTuple::new_bound(py, [sh]);
+            return Ok((HandCat::StraightFlush as i32, tb));
+        }
+    }
+
+    // Rank multiplicities, collect (count, rank) pairs on stack
+    // We'll select patterns: 4,3,2,1 without sorting big arrays.
+    let mut four: Option<i32> = None;
+    let mut trips: [i32; 2] = [0; 2]; let mut n_trips = 0;
+    let mut pairs: [i32; 3] = [0; 3]; let mut n_pairs = 0;
+    let mut highs: [i32; 5] = [0; 5]; let mut n_highs = 0;
+
+    for r in (0..13).rev() {
+        match rc[r] {
+            4 => { four = Some((r as i32) + 2); }
+            3 => {
+                if n_trips < 2 { trips[n_trips] = (r as i32) + 2; n_trips += 1; }
+            }
+            2 => {
+                if n_pairs < 3 { pairs[n_pairs] = (r as i32) + 2; n_pairs += 1; }
+            }
+            1 => {
+                if n_highs < 5 { highs[n_highs] = (r as i32) + 2; n_highs += 1; }
+            }
+            _ => {}
+        }
+    }
+
+    // Quads?
+    if let Some(q) = four {
+        // kicker = highest not equal to q
+        let mut kicker = 0;
+        for r in (0..13).rev() {
+            let rv = (r as i32) + 2;
+            if rv != q && rc[r] > 0 { kicker = rv; break; }
+        }
+        let tb = PyTuple::new_bound(py, [q, kicker]);
+        return Ok((HandCat::Quads as i32, tb));
+    }
+
+    // Full House?
+    if n_trips >= 1 && (n_pairs >= 1 || n_trips >= 2) {
+        let t = trips[0];
+        let p = if n_pairs >= 1 { pairs[0] } else { trips[1] };
+        let tb = PyTuple::new_bound(py, [t, p]);
+        return Ok((HandCat::FullHouse as i32, tb));
+    }
+
+    // Flush?
+    if let Some(s) = flush_suit {
+        let mut top5 = [0; 5];
+        top_k_from_mask(suit_masks[s], 5, &mut top5);
+        let tb = PyTuple::new_bound(py, top5);
+        return Ok((HandCat::Flush as i32, tb));
+    }
+
+    // Straight?
+    if let Some(sh) = straight_high(all_mask) {
+        let tb = PyTuple::new_bound(py, [sh]);
+        return Ok((HandCat::Straight as i32, tb));
+    }
+
+    // Trips?
+    if n_trips >= 1 {
+        // trips + top 2 kickers
+        let t = trips[0];
+        let mut kick = [0; 2]; let mut k = 0;
+        for r in (0..13).rev() {
+            let rv = (r as i32) + 2;
+            if rc[r] > 0 && rv != t {
+                kick[k] = rv; k += 1;
+                if k == 2 { break; }
+            }
+        }
+        let tb = PyTuple::new_bound(py, [t, kick[0], kick[1]]);
+        return Ok((HandCat::Trips as i32, tb));
+    }
+
+    // Two Pair?
+    if n_pairs >= 2 {
+        let hp = pairs[0]; let lp = pairs[1];
+        let mut kicker = 0;
+        for r in (0..13).rev() {
+            let rv = (r as i32) + 2;
+            if rc[r] > 0 && rv != hp && rv != lp { kicker = rv; break; }
+        }
+        let tb = PyTuple::new_bound(py, [hp, lp, kicker]);
+        return Ok((HandCat::TwoPair as i32, tb));
+    }
+
+    // One Pair?
+    if n_pairs == 1 {
+        let p = pairs[0];
+        let mut k = [0; 3]; let mut i = 0;
+        for r in (0..13).rev() {
+            let rv = (r as i32) + 2;
+            if rc[r] > 0 && rv != p {
+                k[i] = rv; i += 1;
+                if i == 3 { break; }
+            }
+        }
+        let tb = PyTuple::new_bound(py, [p, k[0], k[1], k[2]]);
+        return Ok((HandCat::OnePair as i32, tb));
+    }
+
+    // High card: top 5 ranks
+    let mut top5 = [0; 5];
+    top_k_from_mask(all_mask, 5, &mut top5);
+    let tb = PyTuple::new_bound(py, top5);
+    Ok((HandCat::High as i32, tb))
+}
+
+/// (Optional) Batch API to amortize FFI
+#[pyfunction]
+fn best5_rank_from_7_batch_py<'py>(py: Python<'py>, hands: Vec<[i32; 7]>) -> PyResult<(Vec<i32>, Vec<Bound<'py, PyTuple>>)> {
+    let mut cats = Vec::with_capacity(hands.len());
+    let mut tbs  = Vec::with_capacity(hands.len());
+    for h in hands {
+        let (c, tb) = best5_rank_from_7_py(py, h.to_vec())?;
+        cats.push(c);
+        tbs.push(tb);
+    }
+    Ok((cats, tbs))
 }
 
 // ==============================
@@ -656,11 +793,11 @@ fn settle_showdown(n: usize, s: &GameState) -> PyResult<Vec<i32>> {
         let hole = s.players[*i]
             .hole
             .ok_or_else(|| PyValueError::new_err("missing hole cards"))?;
-        let mut seven = [0u8; 7];
-        seven[0] = hole.0;
-        seven[1] = hole.1;
+        let mut seven = [0i32; 7];
+        seven[0] = hole.0 as i32;
+        seven[1] = hole.1 as i32;
         for (k, c) in s.board.iter().enumerate() {
-            seven[2 + k] = *c;
+            seven[2 + k] = *c as i32;
         }
         let (cat, tb) = best5_rank_from_7_rust(&seven);
         ranks.insert(*i, (cat, tb));
@@ -1096,7 +1233,7 @@ impl NLHEngine {
         a: &Action,
     ) -> PyResult<(bool, Option<Vec<i32>>)> {
         // --- SNAPSHOT BEFORE (immutable) ---
-        let (board_len_before, round_before, prev_players) = {
+        let (board_len_before, round_before, _prev_players) = {
             let s = self.cur.as_ref().ok_or_else(|| PyValueError::new_err("no state"))?;
             let snap: Vec<(i32,i32,i32,i64,String)> = s.players.iter()
                 .map(|p| (p.stack, p.bet, p.cont, p.rho, p.status.clone()))
@@ -1506,6 +1643,7 @@ fn nlhe_engine(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(action_type_id, m)?)?;
     m.add_function(wrap_pyfunction!(round_label_id, m)?)?;
     m.add_function(wrap_pyfunction!(best5_rank_from_7_py, m)?)?;
+    m.add_function(wrap_pyfunction!(best5_rank_from_7_batch_py, m)?)?;
 
     // convenience
     let __all__ = vec![
@@ -1522,6 +1660,7 @@ fn nlhe_engine(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         "action_type_id",
         "round_label_id",
         "best5_rank_from_7_py",
+        "best5_rank_from_7_batch_py",
     ];
     m.add("__all__", __all__)?;
     Ok(())

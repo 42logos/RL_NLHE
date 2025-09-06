@@ -88,40 +88,48 @@ class NLHEngine:
         # reusable LegalActionInfo (we just mutate its fields)
         self._la_reusable = PyLegalActionInfo(actions=[], min_raise_to=None, max_raise_to=None, has_raise_right=None)
         
+        # State management for optimization 2 (in-place reset)
+        self._state = None
+        
         # Cache for in-place reset
         self._state = None
 
     def reset_hand(self, button: int = 0) -> PyGameState:
         if self._state is None:
             # Create once by asking Rust for a full snapshot, then reuse forever.
-            s_rs = self._rs.reset_hand(int(button))
-            # convert once (initial)
-            players = []
-            for pr in s_rs.players:
-                players.append(PyPlayerState(
-                    hole=None if pr.hole is None else (int(pr.hole[0]), int(pr.hole[1])),
-                    stack=int(pr.stack), bet=int(pr.bet), cont=int(pr.cont),
-                    status=str(pr.status), rho=int(pr.rho)
-                ))
-            self._state = PyGameState(
-                button=int(s_rs.button),
-                round_label=str(s_rs.round_label),
-                board=[int(x) for x in s_rs.board],
-                undealt=[int(x) for x in s_rs.undealt],
-                players=players,
-                current_bet=int(s_rs.current_bet),
-                min_raise=int(s_rs.min_raise),
-                tau=int(s_rs.tau),
-                next_to_act=None if s_rs.next_to_act is None else int(s_rs.next_to_act),
-                step_idx=int(s_rs.step_idx),
-                pot=int(s_rs.pot),
-                sb=self.sb, bb=self.bb,
-                actions_log=[(int(i),int(a),int(v),int(r)) for (i,a,v,r) in s_rs.actions_log],
-            )
+            self._state = self._create_initial_state(button)
         else:
             # Fast path: mutate in place and return the same object (API compatible)
             self._rs.reset_hand_apply_py(self._state, int(button))
         return self._state
+
+    def _create_initial_state(self, button: int) -> PyGameState:
+        # one-time snapshot to create the Python mirror
+        s_rs = self._rs.reset_hand(int(button))
+        # convert once (initial)
+        players = []
+        for pr in s_rs.players:
+            players.append(PyPlayerState(
+                hole=None if pr.hole is None else (int(pr.hole[0]), int(pr.hole[1])),
+                stack=int(pr.stack), bet=int(pr.bet), cont=int(pr.cont),
+                status=str(pr.status), rho=int(pr.rho)
+            ))
+        s = PyGameState(
+            button=int(s_rs.button),
+            round_label=str(s_rs.round_label),
+            board=[int(x) for x in s_rs.board],
+            undealt=[int(x) for x in s_rs.undealt],
+            players=players,
+            current_bet=int(s_rs.current_bet),
+            min_raise=int(s_rs.min_raise),
+            tau=int(s_rs.tau),
+            next_to_act=None if s_rs.next_to_act is None else int(s_rs.next_to_act),
+            step_idx=int(s_rs.step_idx),
+            pot=int(s_rs.pot),
+            sb=self.sb, bb=self.bb,
+            actions_log=[(int(i),int(a),int(v),int(r)) for (i,a,v,r) in s_rs.actions_log],
+        )
+        return s
 
     # Cheap helper stays in Python
     def owed(self, s: PyGameState, i: int) -> int:

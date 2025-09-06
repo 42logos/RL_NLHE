@@ -774,7 +774,7 @@ def main():
                        help='Number of reset operations to benchmark (default: 1000)')
     parser.add_argument('--step-tests', type=int, default=1000,
                        help='Number of step operations to benchmark (default: 1000)')
-    parser.add_argument('--hand-tests', type=int, default=100,
+    parser.add_argument('--hand-tests', type=int, default=10000,
                        help='Number of full hands to simulate (default: 100)')
     parser.add_argument('--feature-tests', type=int, default=2000,
                        help='Number of single feature tests per feature (default: 2000)')
