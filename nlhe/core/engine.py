@@ -1,3 +1,4 @@
+# nlhe/core/engine.py
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 import random
@@ -64,11 +65,11 @@ class NLHEngine:
         sb_seat = (button + 1) % self.N
         bb_seat = (button + 2) % self.N
         # SB
-        sb_amt = min(self.sb, players[sb_seat].stack)
+        sb_amt = min(self.sb, players[sb_seat].stack)  # Small blind amount
         players[sb_seat].stack -= sb_amt; players[sb_seat].bet += sb_amt; players[sb_seat].cont += sb_amt
         if players[sb_seat].stack == 0 and sb_amt > 0: players[sb_seat].status = 'allin'
         # BB
-        bb_amt = min(self.bb, players[bb_seat].stack)
+        bb_amt = min(self.bb, players[bb_seat].stack)  # Big blind amount
         players[bb_seat].stack -= bb_amt; players[bb_seat].bet += bb_amt; players[bb_seat].cont += bb_amt
         if players[bb_seat].stack == 0 and bb_amt > 0: players[bb_seat].status = 'allin'
 

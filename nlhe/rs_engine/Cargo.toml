@@ -1,0 +1,13 @@
+[package]
+name = "nlhe_engine"
+version = "0.1.0"
+edition = "2021"
+authors = ["you"]
+
+[lib]
+name = "nlhe_engine"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.21", features = ["extension-module"] }
+rand = "0.8"

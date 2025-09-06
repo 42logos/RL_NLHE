@@ -3,8 +3,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import random
 
 # --- Keep your public imports/types exactly the same ---
-from nlhe.core.types import Action as PyAction, ActionType, PlayerState as PyPlayerState
-from nlhe.core.types import GameState as PyGameState, LegalActionInfo as PyLegalActionInfo
+from .types import Action as PyAction, ActionType, PlayerState as PyPlayerState
+from .types import GameState as PyGameState, LegalActionInfo as PyLegalActionInfo
 
 # Keep your historical IDs so logs/agents remain stable
 _ACTION_ID = { ActionType.FOLD: 0, ActionType.CHECK: 1, ActionType.CALL: 2, ActionType.RAISE_TO: 3 }
@@ -174,11 +174,3 @@ class NLHEngine:
         s_rs = _to_rs_state(s)
         done, rewards = self._rs.advance_round_if_needed(s_rs)
         return bool(done), (None if rewards is None else [int(x) for x in rewards])
-
-from nlhe.core.types import Action, ActionType
-eng = NLHEngine(sb=1, bb=2, start_stack=100, rng=random.Random(42))
-s = eng.reset_hand(button=0)
-la = eng.legal_actions(s)
-a = Action(ActionType.CALL) if any(x.kind==ActionType.CALL for x in la.actions) else la.actions[0]
-s, done, rewards, _ = eng.step(s, a)
-print("round:", s.round_label, "done:", done, "rewards:", rewards, 'legalactions:', [x.kind for x in la.actions])

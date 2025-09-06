@@ -22,3 +22,6 @@ multirun/
 # nlhe_eval release files
 nlhe/nlhe_eval/release/
 nlhe/nlhe_eval/target/
+
+#rs_engine build files
+nlhe/rs_engine/target/

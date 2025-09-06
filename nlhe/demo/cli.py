@@ -1,7 +1,7 @@
 from __future__ import annotations
 import random
 from typing import List, Optional
-from ..core.engine import NLHEngine
+from ..core.rs_engine import NLHEngine
 from ..core.types import GameState
 from ..agents.tamed_random import TamedRandomAgent
 from ..agents.human_cli import HumanAgent

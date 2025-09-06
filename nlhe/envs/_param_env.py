@@ -4,7 +4,7 @@ import random
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
-from ..core.engine import NLHEngine
+from ..core.rs_engine import NLHEngine
 from ..core.types import Action, ActionType, GameState
 from ..agents.tamed_random import TamedRandomAgent
 

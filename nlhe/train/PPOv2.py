@@ -106,7 +106,7 @@ def train_and_eval(cfg) -> float:
     for _ in range(epochs):
         result = algo.train()
         # optional: read automatic evaluation results from result["evaluation"]
-        print(f"train iter {result['training_iteration']} reward {result['episode_reward_mean']}")
+        # print(f"train iter {result['training_iteration']} reward {result['episode_reward_mean']}")
 
     evaluator = Evaluator(cfg)
     score, eval_result, ckpt_path = evaluator.run(algo)

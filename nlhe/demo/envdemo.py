@@ -11,6 +11,10 @@ if __name__ == "__main__":
 
     env = NLHEParamEnv(
         seed=args.seed,
-        hero_seat=args.human_seat
+        hero_seat=args.human_seat,
+        history_len=16,
     )
+    
+    s = env.reset()
+    print("Initial observation:", s)
     
