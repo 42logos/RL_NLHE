@@ -1,5 +1,6 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::{PyList, PyTuple};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -1018,6 +1019,156 @@ impl NLHEngine {
             player_updates,
         };
         Ok((done, rewards, diff))
+    }
+
+    /// Fast path: perform step on internal state AND update the given Python GameState mirror in-place.
+    /// Returns (done, rewards?)
+    fn step_apply_py<'py>(
+        &mut self,
+        py: Python<'py>,
+        py_state: &Bound<'py, pyo3::PyAny>,
+        a: &Action,
+    ) -> PyResult<(bool, Option<Vec<i32>>)> {
+        // --- SNAPSHOT BEFORE (immutable) ---
+        let (board_len_before, round_before, prev_players) = {
+            let s = self.cur.as_ref().ok_or_else(|| PyValueError::new_err("no state"))?;
+            let snap: Vec<(i32,i32,i32,i64,String)> = s.players.iter()
+                .map(|p| (p.stack, p.bet, p.cont, p.rho, p.status.clone()))
+                .collect();
+            (s.board.len(), s.round_label.clone(), snap)
+        };
+
+        // --- MUTATE RUST STATE ---
+        let (done, rewards, _last_log) = {
+            let s_mut = self.cur.as_mut().ok_or_else(|| PyValueError::new_err("no state"))?;
+            NLHEngine::step_on_internal(self.n, s_mut, a)?
+        };
+
+        // --- APPLY CHANGES TO PYTHON MIRROR IN ONE CALL ---
+        let s2 = self.cur.as_ref().unwrap();
+
+        // scalars
+        py_state.setattr("step_idx", s2.step_idx)?;
+        py_state.setattr("current_bet", s2.current_bet)?;
+        py_state.setattr("min_raise", s2.min_raise)?;
+        py_state.setattr("tau", s2.tau)?;
+        py_state.setattr("pot", s2.pot)?;
+        match s2.next_to_act {
+            Some(v) => py_state.setattr("next_to_act", v)?,
+            None => py_state.setattr("next_to_act", py.None())?,
+        }
+        if s2.round_label != round_before {
+            py_state.setattr("round_label", s2.round_label.clone())?;
+        }
+
+        // board: append any newly dealt cards
+        if s2.board.len() > board_len_before {
+            let board_obj = py_state.getattr("board")?;
+            let board_py = board_obj.downcast::<PyList>()?;
+            for &c in &s2.board[board_len_before..] {
+                board_py.append(c)?;
+            }
+        }
+
+        // actions_log: push last entry (always one new)
+        if let Some((i, aid, amt, rid)) = s2.actions_log.last().cloned() {
+            let al_obj = py_state.getattr("actions_log")?;
+            let al_py = al_obj.downcast::<PyList>()?;
+            let tup = PyTuple::new_bound(py, &[i.into_py(py), aid.into_py(py), amt.into_py(py), rid.into_py(py)]);
+            al_py.append(tup)?;
+        }
+
+        // players: update only changed ones
+        let players_obj = py_state.getattr("players")?;
+        let players_py = players_obj.downcast::<PyList>()?;
+        for (idx, p_new) in s2.players.iter().enumerate() {
+            let (st0, b0, c0, rho0, ref s0) = prev_players[idx];
+            if st0 != p_new.stack || b0 != p_new.bet || c0 != p_new.cont || rho0 != p_new.rho || *s0 != p_new.status {
+                let p_obj = players_py.get_item(idx)?;
+                p_obj.setattr("stack", p_new.stack)?;
+                p_obj.setattr("bet", p_new.bet)?;
+                p_obj.setattr("cont", p_new.cont)?;
+                p_obj.setattr("rho", p_new.rho)?;
+                if *s0 != p_new.status {
+                    p_obj.setattr("status", p_new.status.clone())?;
+                }
+            }
+        }
+
+        Ok((done, rewards))
+    }
+
+    /// Fast path: advance round if needed, and update Python GameState mirror in-place.
+    fn advance_round_if_needed_apply_py<'py>(
+        &mut self,
+        py: Python<'py>,
+        py_state: &Bound<'py, pyo3::PyAny>,
+    ) -> PyResult<(bool, Option<Vec<i32>>)> {
+        // --- SNAPSHOT BEFORE ---
+        let (board_len_before, round_before, prev_players) = {
+            let s = self.cur.as_ref().ok_or_else(|| PyValueError::new_err("no state"))?;
+            let snap: Vec<(i32,i32,i32,i64,String)> = s.players.iter()
+                .map(|p| (p.stack, p.bet, p.cont, p.rho, p.status.clone()))
+                .collect();
+            (s.board.len(), s.round_label.clone(), snap)
+        };
+
+        // --- MUTATE RUST STATE ---
+        let (done, rewards) = {
+            let s_mut = self.cur.as_mut().ok_or_else(|| PyValueError::new_err("no state"))?;
+            advance_round_if_needed_internal(self.n, s_mut)?
+        };
+
+        // --- APPLY TO PYTHON ---
+        let s2 = self.cur.as_ref().unwrap();
+
+        py_state.setattr("step_idx", s2.step_idx)?;
+        py_state.setattr("current_bet", s2.current_bet)?;
+        py_state.setattr("min_raise", s2.min_raise)?;
+        py_state.setattr("tau", s2.tau)?;
+        py_state.setattr("pot", s2.pot)?;
+        match s2.next_to_act {
+            Some(v) => py_state.setattr("next_to_act", v)?,
+            None => py_state.setattr("next_to_act", py.None())?,
+        }
+        if s2.round_label != round_before {
+            py_state.setattr("round_label", s2.round_label.clone())?;
+        }
+
+        if s2.board.len() > board_len_before {
+            let board_obj = py_state.getattr("board")?;
+            let board_py = board_obj.downcast::<PyList>()?;
+            for &c in &s2.board[board_len_before..] {
+                board_py.append(c)?;
+            }
+        }
+
+        // push last log if any
+        if let Some((i, aid, amt, rid)) = s2.actions_log.last().cloned() {
+            let al_obj = py_state.getattr("actions_log")?;
+            let al_py = al_obj.downcast::<PyList>()?;
+            let tup = PyTuple::new_bound(py, &[i.into_py(py), aid.into_py(py), amt.into_py(py), rid.into_py(py)]);
+            al_py.append(tup)?;
+        }
+
+        // players: only changed
+        let players_obj = py_state.getattr("players")?;
+        let players_py = players_obj.downcast::<PyList>()?;
+        for (idx, p_new) in s2.players.iter().enumerate() {
+            let (st0, b0, c0, rho0, ref s0) = prev_players[idx];
+            if st0 != p_new.stack || b0 != p_new.bet || c0 != p_new.cont || rho0 != p_new.rho || *s0 != p_new.status {
+                let p_obj = players_py.get_item(idx)?;
+                p_obj.setattr("stack", p_new.stack)?;
+                p_obj.setattr("bet", p_new.bet)?;
+                p_obj.setattr("cont", p_new.cont)?;
+                p_obj.setattr("rho", p_new.rho)?;
+                if *s0 != p_new.status {
+                    p_obj.setattr("status", p_new.status.clone())?;
+                }
+            }
+        }
+
+        Ok((done, rewards))
     }
 }
 

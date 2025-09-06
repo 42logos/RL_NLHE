@@ -136,6 +136,7 @@ try:
         return (int(cat), tuple(int(x) for x in tb))
     RUST_EVAL_ACTIVE = True
 except Exception as _e:
+    raise ImportError("Failed to import nlhe_eval") from _e
     print("Warning: nlhe_eval import failed, using Python fallback:", _e)
     RUST_EVAL_ACTIVE = False
     def best5_rank_from_7(cards7: Tuple[int, int, int, int, int, int, int]) -> Tuple[int, Tuple[int, ...]]:

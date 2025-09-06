@@ -106,11 +106,9 @@ class NLHEngine:
         return _from_rs_legal(self._rs.legal_actions_now())
 
     def step(self, s: PyGameState, a: PyAction) -> Tuple[PyGameState, bool, Optional[List[int]], Dict[str, Any]]:
-        done, rewards, diff = self._rs.step_diff(_to_rs_action(a))
-        _apply_diff_inplace(s, diff)
+        done, rewards = self._rs.step_apply_py(s, _to_rs_action(a))
         return s, bool(done), (None if rewards is None else [int(x) for x in rewards]), {}
 
     def advance_round_if_needed(self, s: PyGameState) -> Tuple[bool, Optional[List[int]]]:
-        done, rewards, diff = self._rs.advance_round_if_needed_now()
-        _apply_diff_inplace(s, diff)
+        done, rewards = self._rs.advance_round_if_needed_apply_py(s)
         return bool(done), (None if rewards is None else [int(x) for x in rewards])
