@@ -42,6 +42,11 @@ class Action:
     
     kind: ActionType
     amount: Optional[int] = None  # only for RAISE_TO
+    
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Action):
+            return False
+        return self.kind == other.kind and self.amount == other.amount
 
 @dataclass
 class PlayerState:
@@ -135,3 +140,17 @@ class LegalActionInfo:
     min_raise_to: Optional[int] = None
     max_raise_to: Optional[int] = None
     has_raise_right: Optional[bool] = None
+    
+    def __eq__(self, value: object) -> bool:
+        if not isinstance(value, LegalActionInfo):
+            return False
+        if self.actions != value.actions:
+            return False
+        if self.min_raise_to != value.min_raise_to:
+            return False
+        if self.max_raise_to != value.max_raise_to:
+            return False
+        if self.has_raise_right != value.has_raise_right:
+            return False
+        return True
+

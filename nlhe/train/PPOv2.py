@@ -61,7 +61,7 @@ def build_ppo(cfg) -> PPO:
                 free_log_std=cfg.network_settings.free_log_std,
             )
         )
-        .env_runners(env_to_module_connector=lambda env, spaces, device: [FlattenObservations()])
+        .env_runners(env_to_module_connector=lambda env, spaces, device: [FlattenObservations()], num_env_runners=8)
         .learners(num_learners=0, num_gpus_per_learner=1)
         .callbacks(callbacks_class=partial(DefaultCallback, cfg=cfg))
     )
