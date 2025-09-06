@@ -1170,6 +1170,46 @@ impl NLHEngine {
 
         Ok((done, rewards))
     }
+
+    /// Fast legal-actions: return (mask, min_to, max_to, has_rr)
+    /// mask bits: 1=FOLD, 2=CHECK, 4=CALL, 8=RAISE_TO
+    fn legal_actions_bits_now(&self) -> PyResult<(u8, Option<i32>, Option<i32>, Option<bool>)> {
+        let s = self.cur.as_ref().ok_or_else(|| PyValueError::new_err("no state"))?;
+        let i = match s.next_to_act {
+            Some(x) => x,
+            None => return Ok((0, None, None, None)),
+        };
+        let p = &s.players[i];
+        if p.status != "active" {
+            return Ok((0, None, None, None));
+        }
+
+        let owe = (s.current_bet - p.bet).max(0);
+        let mut mask: u8 = 0;
+        if owe > 0 { mask |= 1; } // FOLD
+        if owe == 0 { mask |= 2; } // CHECK
+        if owe > 0 { mask |= 4; } // CALL
+
+        let can_raise = (p.status == "active") && (p.stack > 0);
+        if !can_raise {
+            return Ok((mask, None, None, None));
+        }
+
+        let min_to = if s.current_bet == 0 {
+            s.min_raise.max(1)
+        } else {
+            s.current_bet + s.min_raise
+        };
+        let max_to = p.bet + p.stack;
+        let has_rr = (p.rho < s.tau) || (s.current_bet == 0);
+
+        if max_to > s.current_bet {
+            mask |= 8; // RAISE_TO
+            Ok((mask, Some(min_to), Some(max_to), Some(has_rr)))
+        } else {
+            Ok((mask, None, None, None))
+        }
+    }
 }
 
 // ---- reset_hand for NLHEngine (mutates self.cur only through return) ----

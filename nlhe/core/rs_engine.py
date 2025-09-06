@@ -68,6 +68,25 @@ class NLHEngine:
         # derive seed from rng if provided (stable behavior)
         seed = int(rng.getrandbits(64)) if rng is not None else None
         self._rs = _rs.NLHEngine(sb=self.sb, bb=self.bb, start_stack=self.start_stack, num_players=self.N, seed=seed)
+        
+        # cache Action singletons (no amounts needed for CHECK/CALL/FOLD; RAISE_TO presence only)
+        self._act_singleton = {
+            ActionType.FOLD:     PyAction(ActionType.FOLD),
+            ActionType.CHECK:    PyAction(ActionType.CHECK),
+            ActionType.CALL:     PyAction(ActionType.CALL),
+            ActionType.RAISE_TO: PyAction(ActionType.RAISE_TO),
+        }
+        # 16 masks -> tuple of singleton Actions in a stable order
+        self._mask_cache = {}
+        for m in range(16):
+            lst = []
+            if m & 1:  lst.append(self._act_singleton[ActionType.FOLD])
+            if m & 2:  lst.append(self._act_singleton[ActionType.CHECK])
+            if m & 4:  lst.append(self._act_singleton[ActionType.CALL])
+            if m & 8:  lst.append(self._act_singleton[ActionType.RAISE_TO])
+            self._mask_cache[m] = tuple(lst)   # tuple = immutable, no per-call allocation of Actions
+        # reusable LegalActionInfo (we just mutate its fields)
+        self._la_reusable = PyLegalActionInfo(actions=[], min_raise_to=None, max_raise_to=None, has_raise_right=None)
 
     def reset_hand(self, button: int = 0) -> PyGameState:
         # one-time snapshot to create the Python mirror
@@ -102,8 +121,13 @@ class NLHEngine:
         return max(0, int(s.current_bet) - int(s.players[i].bet))
 
     def legal_actions(self, s: PyGameState) -> PyLegalActionInfo:
-        # compute from Rust internal state (no serialization of s)
-        return _from_rs_legal(self._rs.legal_actions_now())
+        mask, min_to, max_to, has_rr = self._rs.legal_actions_bits_now()
+        la = self._la_reusable
+        la.actions = self._mask_cache[int(mask)]  # tuple of cached singletons
+        la.min_raise_to = None if min_to is None else int(min_to)
+        la.max_raise_to = None if max_to is None else int(max_to)
+        la.has_raise_right = None if has_rr is None else bool(has_rr)
+        return la
 
     def step(self, s: PyGameState, a: PyAction) -> Tuple[PyGameState, bool, Optional[List[int]], Dict[str, Any]]:
         done, rewards = self._rs.step_apply_py(s, _to_rs_action(a))
