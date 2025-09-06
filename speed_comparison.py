@@ -771,15 +771,15 @@ def compare_results(python_results: Optional[BenchmarkResults],
 def main():
     parser = argparse.ArgumentParser(description='Compare speed of Rust vs Python NLHE engines')
     parser.add_argument('--reset-tests', type=int, default=1000, 
-                       help='Number of reset operations to benchmark (default: 1000)')
+                       help='Number of reset operations to benchmark (default: 10000)')
     parser.add_argument('--step-tests', type=int, default=1000,
-                       help='Number of step operations to benchmark (default: 1000)')
+                       help='Number of step operations to benchmark (default: 10000)')
     parser.add_argument('--hand-tests', type=int, default=10000,
-                       help='Number of full hands to simulate (default: 100)')
+                       help='Number of full hands to simulate (default: 10000)')
     parser.add_argument('--feature-tests', type=int, default=2000,
                        help='Number of single feature tests per feature (default: 2000)')
     parser.add_argument('--single-point-tests', type=int, default=1000,
-                       help='Number of single point operation tests per action type (default: 1000)')
+                       help='Number of single point operation tests per action type (default: 10000)')
     parser.add_argument('--python-only', action='store_true',
                        help='Only test Python engine')
     parser.add_argument('--rust-only', action='store_true', 
