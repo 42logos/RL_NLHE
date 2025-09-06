@@ -8,6 +8,7 @@ train_settings:
   clip_grad_norm: 77
   gamma: 0.8
   shuffle_batches: true
+  num_env_runners: 12
 
 network_settings: 
   fc_hidden_sizes: [256, 256]
@@ -26,6 +27,7 @@ env_settings:
   seed: 42
   starting_stack: 100
   history_length: 64
+  
 
 
 eval_settings:
