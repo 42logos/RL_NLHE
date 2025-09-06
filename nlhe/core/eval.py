@@ -70,7 +70,7 @@ def hand_rank_5(cards5: Tuple[int, int, int, int, int]) -> Tuple[int, Tuple[int,
         return None
 
     s_high = straight_high(uniq)
-    print(f"DEBUG: ranks={ranks}, bycnt={bycnt}, is_flush={is_flush}, s_high={s_high}, uniq={uniq}, bycnt={bycnt}")
+    print("[warning] python eval is used, this is slow!")
     if is_flush and s_high is not None:
         return (HandCategory.STRAIGHT_FLUSH, (s_high,))
     if bycnt[0][1] == 4:
