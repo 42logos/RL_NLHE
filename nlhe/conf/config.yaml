@@ -73,3 +73,41 @@ log_settings:
     save_dir: ./checkpoints
     save_freq: 2
     max_to_keep: 5
+
+# ====== Optuna Sweeper 设置 ======
+
+defaults:
+  - override hydra/sweeper: optuna
+
+
+hydra:
+  sweeper:
+    direction: maximize               # 让训练脚本返回“越大越好”的指标（如 EPReturn）
+    storage: sqlite:///optuna_study.db
+    study_name: core_tune_v1
+    n_trials: 60
+    n_jobs: 1                         # 单机单卡建议 1；多卡或CPU可调高
+
+
+    sampler:
+      _target_: optuna.samplers.TPESampler
+      seed: 2025
+      n_startup_trials: 10
+
+    # ====== 搜索空间（关键） ======
+    params:
+      # 批大小：从 1024 到 9600，步进 512（可按你数据管线粒度调整步长）
+      train_settings.batch_size: range(1024, 9600)
+
+      # 学习率：对数尺度的连续区间
+      train_settings.learning_rate: tag(log, interval(1e-5, 1e-2))
+
+      # 梯度范数裁剪阈值
+      train_settings.clip_grad_norm: interval(0.5, 8.0)
+
+      # 折扣因子
+      train_settings.gamma: interval(0.80, 0.999)
+
+      # LSTM 相关
+      network_settings.use_lstm: choice(true, false)
+      network_settings.lstm_hidden_size: choice(128, 256)
