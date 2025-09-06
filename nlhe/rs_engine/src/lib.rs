@@ -884,6 +884,59 @@ impl NLHEngine {
         Ok(s)
     }
 
+    /// Reset internal state and update the provided Python GameState mirror in-place.
+    /// Returns None (mirror already updated).
+    fn reset_hand_apply_py<'py>(
+        &mut self,
+        py: Python<'py>,
+        py_state: &Bound<'py, pyo3::PyAny>,
+        button: usize,
+    ) -> PyResult<()> {
+        // build new internal rust state
+        let s_new = self.reset_hand_internal(button)?;
+        self.cur = Some(s_new.clone());
+        let s2 = self.cur.as_ref().unwrap();
+
+        // set scalars
+        py_state.setattr("button", s2.button)?;
+        py_state.setattr("round_label", s2.round_label.clone())?;
+        py_state.setattr("current_bet", s2.current_bet)?;
+        py_state.setattr("min_raise", s2.min_raise)?;
+        py_state.setattr("tau", s2.tau)?;
+        py_state.setattr("next_to_act", s2.next_to_act)?;
+        py_state.setattr("step_idx", s2.step_idx)?;
+        py_state.setattr("pot", s2.pot)?;
+        py_state.setattr("sb", s2.sb)?;
+        py_state.setattr("bb", s2.bb)?;
+
+        // board: clear
+        let board_obj = py_state.getattr("board")?;
+        let board_py = board_obj.downcast::<PyList>()?;
+        let empty_list = pyo3::types::PyList::empty_bound(py);
+        board_py.set_slice(0, board_py.len(), &empty_list)?;
+
+        // actions_log: clear
+        let al_obj = py_state.getattr("actions_log")?;
+        let al_py = al_obj.downcast::<PyList>()?;
+        let empty_list2 = pyo3::types::PyList::empty_bound(py);
+        al_py.set_slice(0, al_py.len(), &empty_list2)?;
+
+        // players: update in-place; assume list length is fixed at N
+        let players_obj = py_state.getattr("players")?;
+        let players_py = players_obj.downcast::<PyList>()?;
+        for (idx, p_new) in s2.players.iter().enumerate() {
+            let p_obj = players_py.get_item(idx)?;
+            p_obj.setattr("hole", p_new.hole)?;
+            p_obj.setattr("stack", p_new.stack)?;
+            p_obj.setattr("bet", p_new.bet)?;
+            p_obj.setattr("cont", p_new.cont)?;
+            p_obj.setattr("status", p_new.status.clone())?;
+            p_obj.setattr("rho", p_new.rho)?;
+        }
+
+        Ok(())
+    }
+
     /// Optional: export full snapshot (debug)
     fn export_snapshot(&self) -> PyResult<GameState> {
         match &self.cur {
@@ -913,7 +966,7 @@ impl NLHEngine {
         };
 
         // Now mutate
-        let (done, rewards, last_log) = {
+        let (done, rewards, last_log, _changed_mask) = {
             let s_mut = self
                 .cur
                 .as_mut()
@@ -1021,6 +1074,19 @@ impl NLHEngine {
         Ok((done, rewards, diff))
     }
 
+    /// Same as step_apply_py but avoids creating/converting a Python Action object.
+    /// kind: 0=FOLD,1=CHECK,2=CALL,3=RAISE_TO ; amount: None unless kind==3
+    fn step_apply_py_raw<'py>(
+        &mut self,
+        py: Python<'py>,
+        py_state: &Bound<'py, pyo3::PyAny>,
+        kind: u8,
+        amount: Option<i32>,
+    ) -> PyResult<(bool, Option<Vec<i32>>)> {
+        let a = Action { kind, amount };
+        self.step_apply_py(py, py_state, &a)
+    }
+
     /// Fast path: perform step on internal state AND update the given Python GameState mirror in-place.
     /// Returns (done, rewards?)
     fn step_apply_py<'py>(
@@ -1039,7 +1105,7 @@ impl NLHEngine {
         };
 
         // --- MUTATE RUST STATE ---
-        let (done, rewards, _last_log) = {
+        let (done, rewards, _last_log, changed_mask) = {
             let s_mut = self.cur.as_mut().ok_or_else(|| PyValueError::new_err("no state"))?;
             NLHEngine::step_on_internal(self.n, s_mut, a)?
         };
@@ -1078,21 +1144,20 @@ impl NLHEngine {
             al_py.append(tup)?;
         }
 
-        // players: update only changed ones
+        // players: update only changed ones using the bitmask
         let players_obj = py_state.getattr("players")?;
         let players_py = players_obj.downcast::<PyList>()?;
-        for (idx, p_new) in s2.players.iter().enumerate() {
-            let (st0, b0, c0, rho0, ref s0) = prev_players[idx];
-            if st0 != p_new.stack || b0 != p_new.bet || c0 != p_new.cont || rho0 != p_new.rho || *s0 != p_new.status {
-                let p_obj = players_py.get_item(idx)?;
-                p_obj.setattr("stack", p_new.stack)?;
-                p_obj.setattr("bet", p_new.bet)?;
-                p_obj.setattr("cont", p_new.cont)?;
-                p_obj.setattr("rho", p_new.rho)?;
-                if *s0 != p_new.status {
-                    p_obj.setattr("status", p_new.status.clone())?;
-                }
-            }
+        let mut mask = changed_mask;
+        while mask != 0 {
+            let idx = mask.trailing_zeros() as usize;
+            mask &= mask - 1; // clear lowest set bit
+            let p_new = &s2.players[idx];
+            let p_obj = players_py.get_item(idx)?;
+            p_obj.setattr("stack", p_new.stack)?;
+            p_obj.setattr("bet", p_new.bet)?;
+            p_obj.setattr("cont", p_new.cont)?;
+            p_obj.setattr("rho", p_new.rho)?;
+            p_obj.setattr("status", p_new.status.clone())?;
         }
 
         Ok((done, rewards))
@@ -1105,12 +1170,9 @@ impl NLHEngine {
         py_state: &Bound<'py, pyo3::PyAny>,
     ) -> PyResult<(bool, Option<Vec<i32>>)> {
         // --- SNAPSHOT BEFORE ---
-        let (board_len_before, round_before, prev_players) = {
+        let (board_len_before, round_before) = {
             let s = self.cur.as_ref().ok_or_else(|| PyValueError::new_err("no state"))?;
-            let snap: Vec<(i32,i32,i32,i64,String)> = s.players.iter()
-                .map(|p| (p.stack, p.bet, p.cont, p.rho, p.status.clone()))
-                .collect();
-            (s.board.len(), s.round_label.clone(), snap)
+            (s.board.len(), s.round_label.clone())
         };
 
         // --- MUTATE RUST STATE ---
@@ -1151,21 +1213,16 @@ impl NLHEngine {
             al_py.append(tup)?;
         }
 
-        // players: only changed
+        // players: update all (advance_round affects multiple players)
         let players_obj = py_state.getattr("players")?;
         let players_py = players_obj.downcast::<PyList>()?;
         for (idx, p_new) in s2.players.iter().enumerate() {
-            let (st0, b0, c0, rho0, ref s0) = prev_players[idx];
-            if st0 != p_new.stack || b0 != p_new.bet || c0 != p_new.cont || rho0 != p_new.rho || *s0 != p_new.status {
-                let p_obj = players_py.get_item(idx)?;
-                p_obj.setattr("stack", p_new.stack)?;
-                p_obj.setattr("bet", p_new.bet)?;
-                p_obj.setattr("cont", p_new.cont)?;
-                p_obj.setattr("rho", p_new.rho)?;
-                if *s0 != p_new.status {
-                    p_obj.setattr("status", p_new.status.clone())?;
-                }
-            }
+            let p_obj = players_py.get_item(idx)?;
+            p_obj.setattr("stack", p_new.stack)?;
+            p_obj.setattr("bet", p_new.bet)?;
+            p_obj.setattr("cont", p_new.cont)?;
+            p_obj.setattr("rho", p_new.rho)?;
+            p_obj.setattr("status", p_new.status.clone())?;
         }
 
         Ok((done, rewards))
@@ -1285,7 +1342,7 @@ impl NLHEngine {
         n: usize,
         s: &mut GameState,
         a: &Action,
-    ) -> PyResult<(bool, Option<Vec<i32>>, Option<(usize, i32, i32, i32)>)> {
+    ) -> PyResult<(bool, Option<Vec<i32>>, Option<(usize, i32, i32, i32)>, u64)> {
         let i = s
             .next_to_act
             .ok_or_else(|| PyValueError::new_err("no next_to_act"))?;
@@ -1293,6 +1350,8 @@ impl NLHEngine {
             return Err(PyValueError::new_err("player not active"));
         }
         s.step_idx += 1;
+
+        let mut changed: u64 = 0;
 
         let advance_next = |s: &mut GameState, i: usize, n: usize| {
             let mut j = (i + 1) % n;
@@ -1328,6 +1387,7 @@ impl NLHEngine {
         match a.kind {
             0 => {
                 // FOLD
+                changed |= 1 << i;
                 s.players[i].status = "folded".into();
                 s.players[i].rho = s.step_idx;
                 advance_next(s, i, n);
@@ -1337,6 +1397,7 @@ impl NLHEngine {
                 if owe != 0 {
                     return Err(PyValueError::new_err("cannot CHECK when owing"));
                 }
+                changed |= 1 << i;
                 s.players[i].rho = s.step_idx;
                 advance_next(s, i, n);
             }
@@ -1345,6 +1406,7 @@ impl NLHEngine {
                 if owe <= 0 {
                     return Err(PyValueError::new_err("cannot CALL when owe==0"));
                 }
+                changed |= 1 << i;
                 let call_amt = owe.min(s.players[i].stack);
                 add_chips(s, i, call_amt)?;
                 if s.players[i].stack == 0 {
@@ -1355,6 +1417,7 @@ impl NLHEngine {
             }
             3 => {
                 // RAISE_TO
+                changed |= 1 << i;
                 let raise_to =
                     a.amount
                         .ok_or_else(|| PyValueError::new_err("RAISE_TO requires amount"))?;
@@ -1393,6 +1456,7 @@ impl NLHEngine {
                     s.min_raise = full_inc;
                     for j in 0..n {
                         if j != i && s.players[j].status == "active" {
+                            changed |= 1 << j;
                             s.players[j].rho = -1_000_000_000;
                         }
                     }
@@ -1417,7 +1481,7 @@ impl NLHEngine {
 
         let (done, rewards) = advance_round_if_needed_internal(n, s)?;
         let last_log = s.actions_log.last().cloned();
-        Ok((done, rewards, last_log))
+        Ok((done, rewards, last_log, changed))
     }
 }
 
