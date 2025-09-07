@@ -144,6 +144,13 @@ Install in editable mode (builds Rust extensions if toolchain present):
 pip install -e .
 ```
 
+Alternatively, compile the Rust extension crates directly with the cross-platform helper:
+```bash
+python nlhe/build_rust.py --use-maturin --crate-dir nlhe_eval
+python nlhe/build_rust.py --use-maturin --crate-dir rs_engine
+```
+These build the `nlhe_eval` and `rs_engine` crates and install the resulting modules into the active Python environment.
+
 ## 12. Testing & QA Recommendations
 - Verify invariants: `pot == sum(cont)`, `current_bet == max(bet)` after each action
 - Determinism: replay action logs with fixed seed
