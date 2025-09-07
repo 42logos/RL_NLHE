@@ -616,8 +616,12 @@ fn deal_next_street(s: &mut GameState) -> PyResult<()> {
     }
     Ok(())
 }
-fn reset_round(n: usize, s: &mut GameState) {
-    for p in &mut s.players {
+fn reset_round(n: usize, s: &mut GameState) -> u64 {
+    let mut changed: u64 = 0;
+    for (idx, p) in s.players.iter_mut().enumerate() {
+        if p.bet != 0 || (p.status == "active" && p.rho != -1_000_000_000) {
+            changed |= 1 << idx;
+        }
         p.bet = 0;
         if p.status == "active" {
             p.rho = -1_000_000_000;
@@ -630,11 +634,12 @@ fn reset_round(n: usize, s: &mut GameState) {
     for _ in 0..n {
         if s.players[x].status == "active" {
             s.next_to_act = Some(x);
-            return;
+            return changed;
         }
         x = (x + 1) % n;
     }
     s.next_to_act = None;
+    changed
 }
 fn settle_showdown(n: usize, s: &GameState) -> PyResult<Vec<i32>> {
     let a: Vec<usize> = s
@@ -781,13 +786,13 @@ fn legal_actions_from(s: &GameState) -> PyResult<LegalActionInfo> {
     }
     Ok(LegalActionInfo::new(acts, None, None, None))
 }
-fn advance_round_if_needed_internal(n: usize, s: &mut GameState) -> PyResult<(bool, Option<Vec<i32>>)> {
+fn advance_round_if_needed_internal(n: usize, s: &mut GameState) -> PyResult<(bool, Option<Vec<i32>>, u64)> {
     if let Some(lone) = one_survivor(s) {
         let mut rewards = vec![0i32; n];
         for i in 0..n {
             rewards[i] = if i == lone { s.pot } else { 0 } - s.players[i].cont;
         }
-        return Ok((true, Some(rewards)));
+        return Ok((true, Some(rewards), 0));
     }
 
     if !round_open(s) {
@@ -799,34 +804,34 @@ fn advance_round_if_needed_internal(n: usize, s: &mut GameState) -> PyResult<(bo
             }
             s.round_label = "Showdown".into();
             let rewards = settle_showdown(n, s)?;
-            return Ok((true, Some(rewards)));
+            return Ok((true, Some(rewards), 0));
         }
 
         match s.round_label.as_str() {
             "Preflop" => {
                 deal_next_street(s)?;
-                reset_round(n, s);
-                return Ok((false, None));
+                let reset_mask = reset_round(n, s);
+                return Ok((false, None, reset_mask));
             }
             "Flop" => {
                 deal_next_street(s)?;
-                reset_round(n, s);
-                return Ok((false, None));
+                let reset_mask = reset_round(n, s);
+                return Ok((false, None, reset_mask));
             }
             "Turn" => {
                 deal_next_street(s)?;
-                reset_round(n, s);
-                return Ok((false, None));
+                let reset_mask = reset_round(n, s);
+                return Ok((false, None, reset_mask));
             }
             "River" => {
                 s.round_label = "Showdown".into();
                 let rewards = settle_showdown(n, s)?;
-                return Ok((true, Some(rewards)));
+                return Ok((true, Some(rewards), 0));
             }
             _ => {}
         }
     }
-    Ok((false, None))
+    Ok((false, None, 0))
 }
 
 // ==============================
@@ -966,7 +971,7 @@ impl NLHEngine {
         };
 
         // Now mutate
-        let (done, rewards, last_log, _changed_mask) = {
+        let (done, rewards, last_log, changed_mask) = {
             let s_mut = self
                 .cur
                 .as_mut()
@@ -986,8 +991,13 @@ impl NLHEngine {
             None
         };
 
+        // Build player_updates using the changed mask
         let mut player_updates = Vec::<PlayerDiff>::new();
-        for (idx, p_new) in s2.players.iter().enumerate() {
+        let mut mask = changed_mask;
+        while mask != 0 {
+            let idx = mask.trailing_zeros() as usize;
+            mask &= mask - 1; // clear lowest set bit
+            let p_new = &s2.players[idx];
             player_updates.push(PlayerDiff {
                 idx,
                 stack: p_new.stack,
@@ -1025,7 +1035,7 @@ impl NLHEngine {
         };
 
         // Mutate
-        let (done, rewards) = {
+        let (done, rewards, round_reset_mask) = {
             let s_mut = self
                 .cur
                 .as_mut()
@@ -1045,16 +1055,24 @@ impl NLHEngine {
             None
         };
 
+        // Build player_updates - include all players if round was reset (round_reset_mask != 0)
         let mut player_updates = Vec::<PlayerDiff>::new();
-        for (idx, p_new) in s2.players.iter().enumerate() {
-            player_updates.push(PlayerDiff {
-                idx,
-                stack: p_new.stack,
-                bet: p_new.bet,
-                cont: p_new.cont,
-                rho: p_new.rho,
-                status: Some(p_new.status.clone()),
-            });
+        if round_reset_mask != 0 {
+            // Round was reset, include all players that were affected
+            let mut mask = round_reset_mask;
+            while mask != 0 {
+                let idx = mask.trailing_zeros() as usize;
+                mask &= mask - 1; // clear lowest set bit
+                let p_new = &s2.players[idx];
+                player_updates.push(PlayerDiff {
+                    idx,
+                    stack: p_new.stack,
+                    bet: p_new.bet,
+                    cont: p_new.cont,
+                    rho: p_new.rho,
+                    status: Some(p_new.status.clone()),
+                });
+            }
         }
 
         let last_log = s2.actions_log.last().cloned();
@@ -1096,7 +1114,7 @@ impl NLHEngine {
         a: &Action,
     ) -> PyResult<(bool, Option<Vec<i32>>)> {
         // --- SNAPSHOT BEFORE (immutable) ---
-        let (board_len_before, round_before, prev_players) = {
+        let (board_len_before, round_before, _prev_players) = {
             let s = self.cur.as_ref().ok_or_else(|| PyValueError::new_err("no state"))?;
             let snap: Vec<(i32,i32,i32,i64,String)> = s.players.iter()
                 .map(|p| (p.stack, p.bet, p.cont, p.rho, p.status.clone()))
@@ -1112,6 +1130,7 @@ impl NLHEngine {
 
         // --- APPLY CHANGES TO PYTHON MIRROR IN ONE CALL ---
         let s2 = self.cur.as_ref().unwrap();
+        let round_changed = s2.round_label != round_before;
 
         // scalars
         py_state.setattr("step_idx", s2.step_idx)?;
@@ -1123,7 +1142,7 @@ impl NLHEngine {
             Some(v) => py_state.setattr("next_to_act", v)?,
             None => py_state.setattr("next_to_act", py.None())?,
         }
-        if s2.round_label != round_before {
+        if round_changed {
             py_state.setattr("round_label", s2.round_label.clone())?;
         }
 
@@ -1147,17 +1166,32 @@ impl NLHEngine {
         // players: update only changed ones using the bitmask
         let players_obj = py_state.getattr("players")?;
         let players_py = players_obj.downcast::<PyList>()?;
-        let mut mask = changed_mask;
-        while mask != 0 {
-            let idx = mask.trailing_zeros() as usize;
-            mask &= mask - 1; // clear lowest set bit
-            let p_new = &s2.players[idx];
-            let p_obj = players_py.get_item(idx)?;
-            p_obj.setattr("stack", p_new.stack)?;
-            p_obj.setattr("bet", p_new.bet)?;
-            p_obj.setattr("cont", p_new.cont)?;
-            p_obj.setattr("rho", p_new.rho)?;
-            p_obj.setattr("status", p_new.status.clone())?;
+
+        if round_changed {
+            // If the round changed, reset_round has modified ALL players (bet=0, rho=-1e9 for active).
+            // We must reflect that in the Python mirror for EVERY player.
+            for (idx, p_new) in s2.players.iter().enumerate() {
+                let p_obj = players_py.get_item(idx)?;
+                p_obj.setattr("stack", p_new.stack)?;
+                p_obj.setattr("bet",   p_new.bet  )?;
+                p_obj.setattr("cont",  p_new.cont )?;
+                p_obj.setattr("rho",   p_new.rho  )?;
+                p_obj.setattr("status", p_new.status.clone())?;
+            }
+        } else {
+            // old path: update only changed players using the bitmask
+            let mut mask = changed_mask;
+            while mask != 0 {
+                let idx = mask.trailing_zeros() as usize;
+                mask &= mask - 1; // clear lowest set bit
+                let p_new = &s2.players[idx];
+                let p_obj = players_py.get_item(idx)?;
+                p_obj.setattr("stack", p_new.stack)?;
+                p_obj.setattr("bet", p_new.bet)?;
+                p_obj.setattr("cont", p_new.cont)?;
+                p_obj.setattr("rho", p_new.rho)?;
+                p_obj.setattr("status", p_new.status.clone())?;
+            }
         }
 
         Ok((done, rewards))
@@ -1176,7 +1210,7 @@ impl NLHEngine {
         };
 
         // --- MUTATE RUST STATE ---
-        let (done, rewards) = {
+        let (done, rewards, _round_reset_mask) = {
             let s_mut = self.cur.as_mut().ok_or_else(|| PyValueError::new_err("no state"))?;
             advance_round_if_needed_internal(self.n, s_mut)?
         };
@@ -1479,7 +1513,9 @@ impl NLHEngine {
         s.pot = s.players.iter().map(|pl| pl.cont).sum();
         s.current_bet = s.players.iter().map(|pl| pl.bet).max().unwrap_or(0);
 
-        let (done, rewards) = advance_round_if_needed_internal(n, s)?;
+        let (done, rewards, round_reset_mask) = advance_round_if_needed_internal(n, s)?;
+        // Merge the round reset changes with action-specific changes
+        changed |= round_reset_mask;
         let last_log = s.actions_log.last().cloned();
         Ok((done, rewards, last_log, changed))
     }
