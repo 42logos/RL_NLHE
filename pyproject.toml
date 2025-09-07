@@ -28,6 +28,8 @@ dependencies = [
     "optuna-dashboard>=0.14.0",
     "sqlalchemy>=2.0.43",
     "alembic>=1.16.5",
+    "tomli>=2.2.1",
+    "pytest>=8.4.2",
 ]
 
 
