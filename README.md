@@ -148,6 +148,7 @@ Alternatively, compile the Rust extension crates directly with the cross-platfor
 ```bash
 python build_rust.py --use-maturin --crate-dir nlhe/nlhe_eval
 python build_rust.py --use-maturin --crate-dir nlhe/rs_engine
+
 ```
 These build the `nlhe_eval` and `rs_engine` crates and install the resulting modules into the active Python environment.
 
