@@ -46,16 +46,36 @@ def ensure_cmd(name: str) -> bool:
     return shutil.which(name) is not None
 
 
-def resolve_python(venv: Path) -> str:
-    """Resolve the Python interpreter within *venv* if it exists."""
+def resolve_python(venv: Path, allow_global: bool = False) -> str:
+    """Resolve the Python interpreter within *venv* if it exists.
+
+    If the virtual environment is missing, optionally fall back to the
+    currently running interpreter.  When ``allow_global`` is ``False`` an
+    interactive prompt asks the user whether the global interpreter should be
+    used.  Passing ``allow_global`` skips the prompt and immediately falls
+    back to the global interpreter.
+    """
     if os.name == "nt":
         candidate = venv / "Scripts" / "python.exe"
     else:
         candidate = venv / "bin" / "python"
     if candidate.exists():
         return str(candidate)
-    print(f"Warning: {candidate} not found, using current interpreter", file=sys.stderr)
-    return sys.executable
+
+    if allow_global:
+        print(
+            f"Warning: {candidate} not found, using current interpreter",
+            file=sys.stderr,
+        )
+        return sys.executable
+
+    resp = input(
+        f"Virtual environment not found at {candidate}. "
+        f"Use global interpreter {sys.executable}? [y/N]: "
+    ).strip().lower()
+    if resp in {"y", "yes"}:
+        return sys.executable
+    raise SystemExit("Aborted: virtual environment required")
 
 
 def get_crate_name(crate: Path) -> str:
@@ -109,6 +129,11 @@ def main() -> None:
         help="Python module name (defaults to Cargo package name)",
     )
     parser.add_argument("--use-maturin", default=True, action="store_true", help="build via maturin develop")
+    parser.add_argument(
+        "--allow-global",
+        action="store_true",
+        help="fall back to the global Python interpreter if no venv is found",
+    )
     args = parser.parse_args()
 
     if args.crate_dir == "both":
@@ -120,7 +145,7 @@ def main() -> None:
             if not crate.exists():
                 raise SystemExit(f"crate directory {crate!r} not found")
             module = args.module_name or get_crate_name(crate)
-            py = resolve_python(repo_root / args.venv)
+            py = resolve_python(repo_root / args.venv, allow_global=args.allow_global)
 
             if args.use_maturin:
                 build_with_maturin(py, crate, module)
@@ -133,7 +158,7 @@ def main() -> None:
     if not crate.exists():
         raise SystemExit(f"crate directory {crate!r} not found")
     module = args.module_name or get_crate_name(crate)
-    py = resolve_python(repo_root / args.venv)
+    py = resolve_python(repo_root / args.venv, allow_global=args.allow_global)
 
     if args.use_maturin:
         build_with_maturin(py, crate, module)
