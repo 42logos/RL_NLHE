@@ -1,0 +1,50 @@
+* {
+    font-family: "Segoe UI", sans-serif;
+}
+
+#player-panel {
+    border: 2px solid #000000;
+    border-radius: 8px;
+    background-color: #4c5f54ff;
+    color: #000000ff;
+}
+
+#player-panel[active="true"] {
+    border-color: #ffeb3b;
+}
+
+#player-panel[state="folded"] {
+    background-color: #9e9e9e;
+    color: #ffffff;
+}
+
+#player-panel[state="allin"] {
+    background-color: #d32f2f;
+    color: #ffffff;
+}
+
+#player-panel[state="called"] {
+    background-color: #4c5f54ff;
+    color: #ffffff;
+}
+
+#player-panel[state="raised"] {
+    background-color: #ea9c28ff;
+    color: #ffffff;
+}
+
+QLabel#badge {
+    border-radius: 12px;
+    padding: 0 6px;
+    background-color: #049c46ff;
+    color: #ffffff;
+    font-weight: bold;
+}
+
+QLabel#status-label {
+    border-radius: 4px;
+    padding: 2px 4px;
+    background-color: #8f049cff;
+    color: #ffffff;
+    font-weight: bold;
+}

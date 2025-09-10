@@ -93,30 +93,51 @@ class ChipLabel(QtWidgets.QLabel):
         self.setPixmap(self.pixmap())
 
 
-class BetChip(QtWidgets.QLabel):
-    """Chip-style label showing the player's current bet with animation."""
+class BetChip(QtWidgets.QWidget):
+    """Chip-style widget showing the player's current bet with animation."""
 
     def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
         super().__init__(parent)
+        self._amt = 0
         self._base = 32
+        self._max = int(self._base * 1.5)
         self._apply_size(self._base)
-        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.setStyleSheet(
-            "border-radius:16px; background:#d43333; color:white; font-weight:bold;",
-        )
         self._effect = QtWidgets.QGraphicsOpacityEffect(self)
         self.setGraphicsEffect(self._effect)
         self._effect.setOpacity(1.0)
 
     def _apply_size(self, s: int) -> None:
+        self._size = s
         self.setFixedSize(s, s)
-        font = self.font()
-        font.setPointSize(max(8, int(s / 2)))
-        self.setFont(font)
+        self.update()
+
+    @property
+    def max_size(self) -> int:
+        return self._max
 
     def set_amount(self, amt: int) -> None:
-        self.setText(str(amt))
+        self._amt = amt
         self.setVisible(amt > 0)
+        self.update()
+
+    def paintEvent(self, _: QtGui.QPaintEvent) -> None:  # pragma: no cover - GUI paint
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        s = self._size
+        p.setBrush(QtGui.QColor("#d43333"))
+        p.setPen(QtGui.QPen(QtGui.QColor("white"), 2))
+        p.drawEllipse(0, 0, s - 1, s - 1)
+        p.drawEllipse(3, 3, s - 7, s - 7)
+        p.setPen(QtGui.QPen(QtGui.QColor("white"), 3))
+        for ang in range(0, 360, 45):
+            p.drawArc(3, 3, s - 7, s - 7, ang * 16, 10 * 16)
+        font = p.font()
+        font.setBold(True)
+        font.setPointSize(max(8, int(s / 2)))
+        p.setFont(font)
+        p.setPen(QtGui.QColor("white"))
+        p.drawText(self.rect(), QtCore.Qt.AlignmentFlag.AlignCenter, str(self._amt))
+        p.end()
 
     def animate(self) -> None:
         self._effect.setOpacity(0.0)
@@ -129,7 +150,7 @@ class BetChip(QtWidgets.QLabel):
 
         scale = QtCore.QVariantAnimation(self)
         scale.setDuration(500)
-        scale.setStartValue(self._base * 1.4)
+        scale.setStartValue(self._max)
         scale.setEndValue(self._base)
         scale.valueChanged.connect(lambda v: self._apply_size(int(v)))
 
@@ -144,6 +165,9 @@ class PlayerPanel(QtWidgets.QFrame):
     def __init__(self, seat: int) -> None:
         super().__init__()
         self.seat = seat
+        self.setObjectName("player-panel")
+        # allow QSS background colors to fully apply
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFrameShape(QtWidgets.QFrame.Shape.Box)
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(4, 4, 4, 4)
@@ -156,8 +180,9 @@ class PlayerPanel(QtWidgets.QFrame):
         self.seat_label = QtWidgets.QLabel(f"Seat {seat}")
         self.seat_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.seat_label.setFixedHeight(24)
-        self.seat_label.setStyleSheet(
-            "border-radius:12px; padding:0 6px; background:#333333; color:white;",
+        self.seat_label.setObjectName("badge")
+        self.seat_label.setAttribute(
+            QtCore.Qt.WidgetAttribute.WA_StyledBackground, True
         )
         info_row.addWidget(self.seat_label)
 
@@ -171,7 +196,14 @@ class PlayerPanel(QtWidgets.QFrame):
         info_row.addWidget(self.stack_label)
 
         self.bet_chip = BetChip()
-        info_row.addWidget(self.bet_chip)
+        # Reserve space for bet chip including animation oversize
+        self.bet_box = QtWidgets.QWidget()
+        self.bet_box.setFixedSize(self.bet_chip.max_size, self.bet_chip.max_size)
+        bet_lay = QtWidgets.QHBoxLayout(self.bet_box)
+        bet_lay.setContentsMargins(0, 0, 0, 0)
+        bet_lay.addStretch(1)
+        bet_lay.addWidget(self.bet_chip)
+        info_row.addWidget(self.bet_box)
 
         lay.addLayout(info_row)
 
@@ -182,7 +214,22 @@ class PlayerPanel(QtWidgets.QFrame):
         lay.addLayout(cards_row)
 
         self.last = QtWidgets.QLabel("")
+        self.last.setObjectName("status-label")
+        self.last.setAttribute(
+            QtCore.Qt.WidgetAttribute.WA_StyledBackground, True
+        )
         lay.addWidget(self.last)
+
+        margins = lay.contentsMargins()
+        min_width = (
+            self.seat_label.sizeHint().width()
+            + self.stack_label.sizeHint().width()
+            + self.bet_box.width()
+            + info_row.spacing() * 2
+            + margins.left()
+            + margins.right()
+        )
+        self.setMinimumWidth(min_width)
 
         self._last_bet = 0
 
@@ -204,29 +251,34 @@ class PlayerPanel(QtWidgets.QFrame):
         self._last_bet = p.bet
 
         last_txt = ""
-        bg = "#fcdcda"
+        state = "default"
         if p.status == "folded":
-            bg = "#dddddd"
+            state = "folded"
             last_txt = "fold"
         elif p.status == "allin":
-            bg = "#ffddaa"
+            state = "allin"
             last_txt = "all-in"
         elif last is not None:
             aid, amt = last
             if aid == 1:
                 last_txt = "check"
             elif aid == 2:
-                last_txt = "call"; bg = "#cce0ff"
+                state = "called"
+                last_txt = "call"
             elif aid == 3:
-                last_txt = f"raise to {amt}"; bg = "#c4f5c4"
+                state = "raised"
+                last_txt = f"raise to {amt}"
             else:
-                last_txt = "fold"; bg = "#dddddd"
+                state = "folded"
+                last_txt = "fold"
         self.last.setText(last_txt)
 
-        border = "#280401" if active else "black"
-        self.setStyleSheet(
-            f"border: 2px solid {border}; color: black; background-color: {bg};",
-        )
+        self.setProperty("active", active)
+        self.setProperty("state", state)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        # call QWidget.update to refresh after re-polishing style
+        super().update()
 
 
 class BoardWidget(QtWidgets.QWidget):
