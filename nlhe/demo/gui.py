@@ -14,6 +14,7 @@ The demo is intentionally lightweight but demonstrates how to drive the
 from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
+from pathlib import Path
 
 from PyQt6 import QtCore, QtWidgets
 
@@ -29,6 +30,11 @@ class NLHEGui(QtWidgets.QMainWindow):
         super().__init__()
         self.setWindowTitle("NLHE 6-Max GUI")
         self.hero_seat = hero_seat
+
+        # load application wide stylesheet
+        style_file = Path(__file__).with_name("styles.qss")
+        if style_file.exists():
+            self.setStyleSheet(style_file.read_text())
 
         self.controller = GameController(hero_seat=hero_seat, seed=seed)
         self.controller.state_changed.connect(self._on_state_changed)
@@ -88,6 +94,7 @@ class NLHEGui(QtWidgets.QMainWindow):
         btn_layout.addWidget(self.raise_info)
 
         self.status_label = QtWidgets.QLabel("")
+        self.status_label.setObjectName("status-label")
         main.addWidget(self.status_label)
 
         self.log = QtWidgets.QPlainTextEdit()
