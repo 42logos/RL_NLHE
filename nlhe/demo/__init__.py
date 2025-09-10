@@ -3,5 +3,5 @@
 This package exposes command-line and graphical demos.
 """
 
-__all__ = ["cli", "envdemo", "gui"]
+__all__ = ["cli", "envdemo", "gui", "controller"]
 

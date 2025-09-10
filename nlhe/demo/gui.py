@@ -14,15 +14,13 @@ The demo is intentionally lightweight but demonstrates how to drive the
 
 from __future__ import annotations
 
-import random
 from typing import Dict, List, Optional, Tuple
 
 from PyQt6 import QtCore, QtWidgets
 
-from ..agents.tamed_random import TamedRandomAgent
 from ..core.cards import rank_of, suit_of
-from ..core.engine import NLHEngine
 from ..core.types import Action, ActionType, GameState, PlayerState
+from .controller import GameController
 
 
 # ----- card helpers -------------------------------------------------------
@@ -103,24 +101,15 @@ class NLHEGui(QtWidgets.QMainWindow):
     def __init__(self, hero_seat: int = 0, seed: int = 42) -> None:
         super().__init__()
         self.setWindowTitle("NLHE 6-Max GUI")
-
         self.hero_seat = hero_seat
-        self.seed_val = seed
-        self.rng = random.Random(seed)
-        self.engine = NLHEngine(sb=1, bb=2, start_stack=100, rng=self.rng)
-        self.agents: List[TamedRandomAgent | None] = [
-            TamedRandomAgent(self.rng) for _ in range(self.engine.N)
-        ]
-        self.agents[hero_seat] = None  # human
-        self.state: GameState = self.engine.reset_hand(button=0)
+
+        self.controller = GameController(hero_seat=hero_seat, seed=seed)
+        self.controller.state_changed.connect(self._on_state_changed)
+        self.controller.hand_finished.connect(self._end_hand)
+        self.controller.action_logged.connect(self._log_action)
 
         self._create_widgets()
-        self._update_view()
-
-        self.timer = QtCore.QTimer(self)
-        self.timer.setInterval(400)
-        self.timer.timeout.connect(self._play_loop)
-        self.timer.start()
+        self._on_state_changed(self.controller.state)
 
     # ----- construction --------------------------------------------------
     def _create_widgets(self) -> None:
@@ -132,7 +121,7 @@ class NLHEGui(QtWidgets.QMainWindow):
         pos = {0: (2, 1), 1: (1, 2), 2: (0, 2), 3: (0, 1), 4: (0, 0), 5: (1, 0)}
 
         self.player_panels: List[PlayerPanel] = []
-        for seat in range(self.engine.N):
+        for seat in range(self.controller.engine.N):
             panel = PlayerPanel(seat)
             self.player_panels.append(panel)
             grid.addWidget(panel, *pos[seat])
@@ -179,7 +168,7 @@ class NLHEGui(QtWidgets.QMainWindow):
 
         seed_row = QtWidgets.QHBoxLayout(); main.addLayout(seed_row)
         seed_row.addWidget(QtWidgets.QLabel("Seed:"))
-        self.seed_edit = QtWidgets.QLineEdit(str(self.seed_val))
+        self.seed_edit = QtWidgets.QLineEdit(str(self.controller.seed_val))
         self.seed_edit.setFixedWidth(80)
         seed_row.addWidget(self.seed_edit)
         self.next_hand_btn = QtWidgets.QPushButton("Next Hand")
@@ -189,7 +178,7 @@ class NLHEGui(QtWidgets.QMainWindow):
 
     # ----- helpers -------------------------------------------------------
     def _last_action(self, seat: int) -> Optional[Tuple[int, int]]:
-        for sid, aid, amt, _ in reversed(self.state.actions_log):
+        for sid, aid, amt, _ in reversed(self.controller.state.actions_log):
             if sid == seat:
                 return aid, amt
         return None
@@ -205,32 +194,36 @@ class NLHEGui(QtWidgets.QMainWindow):
             msg = f"Seat {seat} folds"
         self.log.appendPlainText(msg)
 
+    def _on_state_changed(self, _state: GameState) -> None:
+        self._update_view()
+
     def _update_view(self) -> None:
         # board and pot
-        if self.state.board:
-            self.board_label.setText(f"Board: {cards_str(self.state.board)}")
+        state = self.controller.state
+        if state.board:
+            self.board_label.setText(f"Board: {cards_str(state.board)}")
         else:
             self.board_label.setText("Board: (preflop)")
-        self.pot_label.setText(f"Pot: {self.state.pot}")
+        self.pot_label.setText(f"Pot: {state.pot}")
 
         # players
         for i, pnl in enumerate(self.player_panels):
-            p = self.state.players[i]
+            p = state.players[i]
             pnl.update(p, i == self.hero_seat,
-                       self.state.next_to_act == i,
+                       state.next_to_act == i,
                        self._last_action(i))
 
         # status and action availability
-        if self.state.next_to_act is not None:
-            seat = self.state.next_to_act
-            to_call = self.state.current_bet - self.state.players[seat].bet
+        if state.next_to_act is not None:
+            seat = state.next_to_act
+            to_call = state.current_bet - state.players[seat].bet
             self.status_label.setText(
                 f"Seat {seat} to act - to call {to_call}"
             )
         else:
             self.status_label.setText("Waiting for round advance...")
 
-        info = self.engine.legal_actions(self.state)
+        info = self.controller.engine.legal_actions(state)
         allowed = {a.kind for a in info.actions}
         self.action_buttons["FOLD"].setEnabled(ActionType.FOLD in allowed)
         self.action_buttons["CHECK"].setEnabled(ActionType.CHECK in allowed)
@@ -254,36 +247,10 @@ class NLHEGui(QtWidgets.QMainWindow):
         else:
             self.raise_info.setText("")
 
-    # ----- gameplay loop -------------------------------------------------
-    def _play_loop(self) -> None:
-        if self.state.next_to_act is None:
-            done, rewards = self.engine.advance_round_if_needed(self.state)
-            if done:
-                self._end_hand(rewards)
-                return
-            self._update_view()
-            return
-
-        seat = self.state.next_to_act
-        if seat == self.hero_seat:
-            return  # wait for user
-
-        agent = self.agents[seat]
-        assert agent is not None
-        action = agent.act(self.engine, self.state, seat)
-        self._log_action(seat, action)
-        self.state, done, rewards, _ = self.engine.step(self.state, action)
-        if done:
-            self._end_hand(rewards); return
-        if self.state.next_to_act is None:
-            done, rewards = self.engine.advance_round_if_needed(self.state)
-            if done:
-                self._end_hand(rewards); return
-        self._update_view()
 
     # ----- user actions --------------------------------------------------
     def _on_action(self, name: str) -> None:
-        if self.state.next_to_act != self.hero_seat:
+        if self.controller.state.next_to_act != self.hero_seat:
             return
         if name == "FOLD":
             action = Action(ActionType.FOLD)
@@ -311,20 +278,13 @@ class NLHEGui(QtWidgets.QMainWindow):
         else:
             return
 
-        self._log_action(self.hero_seat, action)
-        self.state, done, rewards, _ = self.engine.step(self.state, action)
-        if done:
-            self._end_hand(rewards); return
-        if self.state.next_to_act is None:
-            done, rewards = self.engine.advance_round_if_needed(self.state)
-            if done:
-                self._end_hand(rewards); return
-        self._update_view()
+        self.controller.submit_action(action)
 
     # ----- end -----------------------------------------------------------
     def _end_hand(self, rewards: List[int]) -> None:
+        state = self.controller.state
         for i, pnl in enumerate(self.player_panels):
-            p = self.state.players[i]
+            p = state.players[i]
             hole = cards_str(list(p.hole)) if p.hole else "?? ??"
             pnl.hole.setText(hole)
         msg = "\n".join(f"Seat {i}: {r}" for i, r in enumerate(rewards))
@@ -334,30 +294,22 @@ class NLHEGui(QtWidgets.QMainWindow):
         self.raise_edit.setEnabled(False)
         self.raise_slider.setEnabled(False)
         self.status_label.setText("Hand complete")
-        self.timer.stop()
-        # derive a fresh seed for the next hand so card order changes
-        new_seed = random.Random(self.seed_val).randrange(1 << 30)
-        self.seed_val = new_seed
-        self.seed_edit.setText(str(new_seed))
+        self.seed_edit.setText(str(self.controller.seed_val))
         self.next_hand_btn.setEnabled(True)
 
     def _start_next_hand(self) -> None:
         try:
             seed = int(self.seed_edit.text())
         except ValueError:
-            seed = random.randrange(1 << 30)
-            self.seed_edit.setText(str(seed))
-        self.seed_val = seed
-        self.rng.seed(seed)
-        button = (self.state.button + 1) % self.engine.N
-        self.state = self.engine.reset_hand(button=button)
+            seed = None
+        self.controller.start_next_hand(seed)
+        self.seed_edit.setText(str(self.controller.seed_val))
         self.log.clear()
         for btn in self.action_buttons.values():
             btn.setEnabled(True)
         self.raise_edit.setEnabled(True)
         self.raise_slider.setEnabled(True)
         self.next_hand_btn.setEnabled(False)
-        self.timer.start()
         self._update_view()
 
 
