@@ -162,7 +162,7 @@ $$
 The raise amount is computed as:
 
 $$
-a_{\text{raise}} = \text{min\_raise} + r \cdot (\text{max\_raise} - \text{min\_raise})
+\mathbf{a}_{\text{raise}} = \text{min\_raise} + r \cdot (\text{max\_raise} - \text{min\_raise})
 $$
 
 
