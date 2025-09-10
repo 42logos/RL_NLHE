@@ -93,6 +93,51 @@ class ChipLabel(QtWidgets.QLabel):
         self.setPixmap(self.pixmap())
 
 
+class BetChip(QtWidgets.QLabel):
+    """Chip-style label showing the player's current bet with animation."""
+
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
+        super().__init__(parent)
+        self._base = 32
+        self._apply_size(self._base)
+        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.setStyleSheet(
+            "border-radius:16px; background:#d43333; color:white; font-weight:bold;",
+        )
+        self._effect = QtWidgets.QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(self._effect)
+        self._effect.setOpacity(1.0)
+
+    def _apply_size(self, s: int) -> None:
+        self.setFixedSize(s, s)
+        font = self.font()
+        font.setPointSize(max(8, int(s / 2)))
+        self.setFont(font)
+
+    def set_amount(self, amt: int) -> None:
+        self.setText(str(amt))
+        self.setVisible(amt > 0)
+
+    def animate(self) -> None:
+        self._effect.setOpacity(0.0)
+        group = QtCore.QParallelAnimationGroup(self)
+
+        fade = QtCore.QPropertyAnimation(self._effect, b"opacity")
+        fade.setDuration(500)
+        fade.setStartValue(0.0)
+        fade.setEndValue(1.0)
+
+        scale = QtCore.QVariantAnimation(self)
+        scale.setDuration(500)
+        scale.setStartValue(self._base * 1.4)
+        scale.setEndValue(self._base)
+        scale.valueChanged.connect(lambda v: self._apply_size(int(v)))
+
+        group.addAnimation(fade)
+        group.addAnimation(scale)
+        group.start(QtCore.QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
+
+
 class PlayerPanel(QtWidgets.QFrame):
     """Visual representation of a single player's public state."""
 
@@ -115,9 +160,8 @@ class PlayerPanel(QtWidgets.QFrame):
         info_row.addWidget(self.seat_text)
         self.stack_label = QtWidgets.QLabel("Stack 0")
         info_row.addWidget(self.stack_label)
-        info_row.addWidget(ChipLabel())
-        self.round_label = QtWidgets.QLabel("Round 0")
-        info_row.addWidget(self.round_label)
+        self.bet_chip = BetChip()
+        info_row.addWidget(self.bet_chip)
         lay.addLayout(info_row)
 
         cards_row = QtWidgets.QHBoxLayout()
@@ -129,16 +173,7 @@ class PlayerPanel(QtWidgets.QFrame):
         self.last = QtWidgets.QLabel("")
         lay.addWidget(self.last)
 
-        self._bet_effect = QtWidgets.QGraphicsOpacityEffect(self.round_label)
-        self.round_label.setGraphicsEffect(self._bet_effect)
         self._last_bet = 0
-
-    def _animate_bet(self) -> None:
-        anim = QtCore.QPropertyAnimation(self._bet_effect, b"opacity")
-        anim.setDuration(600)
-        anim.setStartValue(0.0)
-        anim.setEndValue(1.0)
-        anim.start(QtCore.QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
 
     def update(
         self,
@@ -152,9 +187,9 @@ class PlayerPanel(QtWidgets.QFrame):
             lbl.set_card(holes[i] if i < len(holes) else None)
 
         self.stack_label.setText(f"Stack {p.stack}")
-        self.round_label.setText(f"Round {p.bet}")
+        self.bet_chip.set_amount(p.bet)
         if p.bet > self._last_bet:
-            self._animate_bet()
+            self.bet_chip.animate()
         self._last_bet = p.bet
 
         last_txt = ""
