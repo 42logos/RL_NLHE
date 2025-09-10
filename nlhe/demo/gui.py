@@ -1,31 +1,36 @@
 """PyQt6-based demo GUI for playing a single NLHE hand.
 
-This modernised interface lets a human play one 6-max No-Limit Texas
-Hold'em hand against basic random agents.  It demonstrates interaction with
-the ``NLHEngine`` API while providing a minimal but cleaner look compared to
-the previous Tkinter demo.
+This widget-heavy rewrite organises the table in a more conventional poker
+layout.  Community cards and pot sit in the middle while six ``PlayerPanel``
+widgets surround the table.  Each panel shows stack, bet, status, hole cards
+and last action with colour cues for folds, calls, raises and all-ins.  The
+acting seat receives a yellow border and the action bar exposes a raise slider
+interpreted as a *difference* over the current bet.
+
+The demo is intentionally lightweight but demonstrates how to drive the
+``NLHEngine`` interactively from a GUI application.
 """
 
 from __future__ import annotations
 
 import random
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from PyQt6 import QtCore, QtWidgets
 
 from ..agents.tamed_random import TamedRandomAgent
 from ..core.cards import rank_of, suit_of
 from ..core.engine import NLHEngine
-from ..core.types import Action, ActionType, GameState
+from ..core.types import Action, ActionType, GameState, PlayerState
 
 
+# ----- card helpers -------------------------------------------------------
 RSTR = {11: "J", 12: "Q", 13: "K", 14: "A"}
 SUIT = ["♣", "♦", "♥", "♠"]
 
 
 def card_str(c: int) -> str:
-    r = rank_of(c)
-    s = suit_of(c)
+    r = rank_of(c); s = suit_of(c)
     rs = str(r) if r <= 10 else RSTR[r]
     return f"{rs}{SUIT[s]}"
 
@@ -34,16 +39,72 @@ def cards_str(cards: List[int]) -> str:
     return " ".join(card_str(c) for c in cards)
 
 
+# ----- player widget ------------------------------------------------------
+class PlayerPanel(QtWidgets.QFrame):
+    """Visual representation of a single player's public state."""
+
+    def __init__(self, seat: int) -> None:
+        super().__init__()
+        self.seat = seat
+        self.setFrameShape(QtWidgets.QFrame.Shape.Box)
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.setContentsMargins(4, 4, 4, 4)
+
+        self.info = QtWidgets.QLabel(f"Seat {seat}")
+        self.hole = QtWidgets.QLabel("?? ??")
+        self.last = QtWidgets.QLabel("")
+        lay.addWidget(self.info)
+        lay.addWidget(self.hole)
+        lay.addWidget(self.last)
+
+        self._opacity = QtWidgets.QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(self._opacity)
+
+    def update(self, p: PlayerState, hero: bool,
+               active: bool, last: Optional[Tuple[int, int]]) -> None:
+        hole = cards_str(list(p.hole)) if hero and p.hole else "?? ??"
+        self.hole.setText(hole)
+        self.info.setText(
+            f"Stack {p.stack} | Bet {p.bet} | Cont {p.cont} | {p.status}"
+        )
+
+        last_txt = ""
+        colour = "black"
+        if p.status == "folded":
+            colour = "grey"
+            last_txt = "fold"
+        elif p.status == "allin":
+            colour = "orange"
+            last_txt = "all-in"
+        elif last is not None:
+            aid, amt = last
+            if aid == 1:
+                last_txt = "check"
+            elif aid == 2:
+                last_txt = "call"; colour = "blue"
+            elif aid == 3:
+                last_txt = f"raise to {amt}"; colour = "green"
+            else:
+                last_txt = "fold"; colour = "grey"
+        self.last.setText(last_txt)
+
+        border = "yellow" if active else "black"
+        self.setStyleSheet(f"border: 2px solid {border}; color: {colour};")
+        self._opacity.setOpacity(1.0 if active else 0.6)
+
+
+# ----- main window --------------------------------------------------------
 class NLHEGui(QtWidgets.QMainWindow):
-    """Simple PyQt6 GUI to play a single NLHE hand against random agents."""
+    """Play a single 6-max NLHE hand against basic random agents."""
 
     def __init__(self, hero_seat: int = 0, seed: int = 42) -> None:
         super().__init__()
         self.setWindowTitle("NLHE 6-Max GUI")
+
         self.hero_seat = hero_seat
         self.rng = random.Random(seed)
         self.engine = NLHEngine(sb=1, bb=2, start_stack=100, rng=self.rng)
-        self.agents: List | List[TamedRandomAgent | None] = [
+        self.agents: List[TamedRandomAgent | None] = [
             TamedRandomAgent(self.rng) for _ in range(self.engine.N)
         ]
         self.agents[hero_seat] = None  # human
@@ -52,97 +113,105 @@ class NLHEGui(QtWidgets.QMainWindow):
         self._create_widgets()
         self._update_view()
 
-        # periodic timer for engine progression
         self.timer = QtCore.QTimer(self)
-        self.timer.setInterval(500)
+        self.timer.setInterval(400)
         self.timer.timeout.connect(self._play_loop)
         self.timer.start()
 
-    # ----- UI setup -----
+    # ----- construction --------------------------------------------------
     def _create_widgets(self) -> None:
-        central = QtWidgets.QWidget(self)
-        self.setCentralWidget(central)
+        central = QtWidgets.QWidget(self); self.setCentralWidget(central)
+        main = QtWidgets.QVBoxLayout(central)
 
-        layout = QtWidgets.QVBoxLayout(central)
+        # table layout
+        grid = QtWidgets.QGridLayout(); main.addLayout(grid)
+        pos = {0: (2, 1), 1: (1, 2), 2: (0, 2), 3: (0, 1), 4: (0, 0), 5: (1, 0)}
 
+        self.player_panels: List[PlayerPanel] = []
+        for seat in range(self.engine.N):
+            panel = PlayerPanel(seat)
+            self.player_panels.append(panel)
+            grid.addWidget(panel, *pos[seat])
+
+        center = QtWidgets.QWidget(); grid.addWidget(center, 1, 1)
+        cl = QtWidgets.QVBoxLayout(center)
+        cl.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.board_label = QtWidgets.QLabel("Board: (preflop)")
-        layout.addWidget(self.board_label)
+        self.pot_label = QtWidgets.QLabel("Pot: 0")
+        cl.addWidget(self.board_label, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)
+        cl.addWidget(self.pot_label, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)
 
-        self.player_labels: List[QtWidgets.QLabel] = []
-        for _ in range(self.engine.N):
-            lbl = QtWidgets.QLabel("")
-            layout.addWidget(lbl)
-            self.player_labels.append(lbl)
-
-        btn_layout = QtWidgets.QHBoxLayout()
-        layout.addLayout(btn_layout)
-        self.action_buttons: dict[str, QtWidgets.QPushButton] = {}
+        # action bar
+        btn_layout = QtWidgets.QHBoxLayout(); main.addLayout(btn_layout)
+        self.action_buttons: Dict[str, QtWidgets.QPushButton] = {}
         for name in ["FOLD", "CHECK", "CALL", "RAISE"]:
             btn = QtWidgets.QPushButton(name)
             btn.clicked.connect(lambda _, n=name: self._on_action(n))
             btn_layout.addWidget(btn)
             self.action_buttons[name] = btn
 
+        self.raise_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.raise_slider.setFixedWidth(120)
+        self.raise_slider.valueChanged.connect(
+            lambda v: self.raise_edit.setText(str(v))
+        )
+        btn_layout.addWidget(self.raise_slider)
+
         self.raise_edit = QtWidgets.QLineEdit()
         self.raise_edit.setFixedWidth(60)
         self.raise_edit.setPlaceholderText("raise diff")
         btn_layout.addWidget(self.raise_edit)
 
-        self.status_label = QtWidgets.QLabel("")
-        layout.addWidget(self.status_label)
+        self.raise_info = QtWidgets.QLabel("")
+        btn_layout.addWidget(self.raise_info)
 
-    # ----- helpers -----
-    def _last_action(self, seat: int) -> Optional[tuple[int, int]]:
-        """Return the last (aid, amount) for a seat if available."""
+        self.status_label = QtWidgets.QLabel("")
+        main.addWidget(self.status_label)
+
+        self.log = QtWidgets.QPlainTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setFixedHeight(120)
+        main.addWidget(self.log)
+
+    # ----- helpers -------------------------------------------------------
+    def _last_action(self, seat: int) -> Optional[Tuple[int, int]]:
         for sid, aid, amt, _ in reversed(self.state.actions_log):
             if sid == seat:
                 return aid, amt
         return None
 
+    def _log_action(self, seat: int, action: Action) -> None:
+        if action.kind == ActionType.RAISE_TO:
+            msg = f"Seat {seat} raises to {action.amount}"
+        elif action.kind == ActionType.CALL:
+            msg = f"Seat {seat} calls"
+        elif action.kind == ActionType.CHECK:
+            msg = f"Seat {seat} checks"
+        else:
+            msg = f"Seat {seat} folds"
+        self.log.appendPlainText(msg)
+
     def _update_view(self) -> None:
-        # Board
+        # board and pot
         if self.state.board:
             self.board_label.setText(f"Board: {cards_str(self.state.board)}")
         else:
             self.board_label.setText("Board: (preflop)")
+        self.pot_label.setText(f"Pot: {self.state.pot}")
 
-        # Players
-        for i, lbl in enumerate(self.player_labels):
+        # players
+        for i, pnl in enumerate(self.player_panels):
             p = self.state.players[i]
-            if i == self.hero_seat and p.hole:
-                hole = cards_str(list(p.hole))
-            else:
-                hole = "?? ??"
-            last = self._last_action(i)
-            if last is None:
-                last_str = ""
-            else:
-                aid, amt = last
-                if aid == 0:
-                    last_str = "fold"
-                elif aid == 1:
-                    last_str = "check"
-                elif aid == 2:
-                    last_str = "call"
-                else:
-                    last_str = f"raise to {amt}"
-            text = (
-                f"Seat {i} | stack={p.stack:3} bet={p.bet:3} cont={p.cont:3}"
-                f" status={p.status:6} last={last_str:8} hole={hole}"
-            )
-            lbl.setText(text)
-            if p.status == "folded":
-                lbl.setStyleSheet("color: grey")
-            elif last_str.startswith("raise"):
-                lbl.setStyleSheet("color: green")
-            else:
-                lbl.setStyleSheet("")
+            pnl.update(p, i == self.hero_seat,
+                       self.state.next_to_act == i,
+                       self._last_action(i))
 
+        # status and action availability
         if self.state.next_to_act is not None:
             seat = self.state.next_to_act
             to_call = self.state.current_bet - self.state.players[seat].bet
             self.status_label.setText(
-                f"Next to act: Seat {seat} (to call {to_call})"
+                f"Seat {seat} to act - to call {to_call}"
             )
         else:
             self.status_label.setText("Waiting for round advance...")
@@ -152,13 +221,32 @@ class NLHEGui(QtWidgets.QMainWindow):
         self.action_buttons["FOLD"].setEnabled(ActionType.FOLD in allowed)
         self.action_buttons["CHECK"].setEnabled(ActionType.CHECK in allowed)
         self.action_buttons["CALL"].setEnabled(ActionType.CALL in allowed)
+
         raise_allowed = ActionType.RAISE_TO in allowed
         self.action_buttons["RAISE"].setEnabled(raise_allowed)
         self.raise_edit.setEnabled(raise_allowed)
-        self.min_raise_to = getattr(info, "min_raise_to", None)
-        self.max_raise_to = getattr(info, "max_raise_to", None)
+        self.raise_slider.setEnabled(raise_allowed)
 
-    # ----- gameplay loop -----
+        if raise_allowed:
+            self.min_raise_to = getattr(info, "min_raise_to", None)
+            self.max_raise_to = getattr(info, "max_raise_to", None)
+            if self.min_raise_to is not None:
+                min_diff = self.min_raise_to - self.state.current_bet
+            else:
+                min_diff = 0
+            if self.max_raise_to is not None:
+                max_diff = self.max_raise_to - self.state.current_bet
+            else:
+                max_diff = min_diff
+            self.raise_slider.setMinimum(min_diff)
+            self.raise_slider.setMaximum(max_diff)
+            self.raise_slider.setValue(min_diff)
+            self.raise_edit.setText(str(min_diff))
+            self.raise_info.setText(f"[{min_diff}-{max_diff}]")
+        else:
+            self.raise_info.setText("")
+
+    # ----- gameplay loop -------------------------------------------------
     def _play_loop(self) -> None:
         if self.state.next_to_act is None:
             done, rewards = self.engine.advance_round_if_needed(self.state)
@@ -170,32 +258,31 @@ class NLHEGui(QtWidgets.QMainWindow):
 
         seat = self.state.next_to_act
         if seat == self.hero_seat:
-            # wait for user action
-            return
+            return  # wait for user
 
         agent = self.agents[seat]
         assert agent is not None
         action = agent.act(self.engine, self.state, seat)
+        self._log_action(seat, action)
         self.state, done, rewards, _ = self.engine.step(self.state, action)
         if done:
-            self._end_hand(rewards)
-            return
+            self._end_hand(rewards); return
         if self.state.next_to_act is None:
             done, rewards = self.engine.advance_round_if_needed(self.state)
             if done:
-                self._end_hand(rewards)
-                return
+                self._end_hand(rewards); return
         self._update_view()
 
+    # ----- user actions --------------------------------------------------
     def _on_action(self, name: str) -> None:
         if self.state.next_to_act != self.hero_seat:
             return
         if name == "FOLD":
-            a = Action(ActionType.FOLD)
+            action = Action(ActionType.FOLD)
         elif name == "CHECK":
-            a = Action(ActionType.CHECK)
+            action = Action(ActionType.CHECK)
         elif name == "CALL":
-            a = Action(ActionType.CALL)
+            action = Action(ActionType.CALL)
         elif name == "RAISE":
             try:
                 inc = int(self.raise_edit.text())
@@ -206,44 +293,41 @@ class NLHEGui(QtWidgets.QMainWindow):
             if self.min_raise_to is not None and target < self.min_raise_to:
                 need = self.min_raise_to - self.state.current_bet
                 QtWidgets.QMessageBox.critical(
-                    self,
-                    "Invalid",
-                    f"Minimum raise diff is {need}",
-                )
+                    self, "Invalid", f"Minimum raise diff is {need}"
+                );
                 return
             if self.max_raise_to is not None and target > self.max_raise_to:
                 cap = self.max_raise_to - self.state.current_bet
                 QtWidgets.QMessageBox.critical(
-                    self,
-                    "Invalid",
-                    f"Maximum raise diff is {cap}",
-                )
+                    self, "Invalid", f"Maximum raise diff is {cap}"
+                );
                 return
-            a = Action(ActionType.RAISE_TO, amount=target)
+            action = Action(ActionType.RAISE_TO, amount=target)
         else:
             return
 
-        self.state, done, rewards, _ = self.engine.step(self.state, a)
+        self._log_action(self.hero_seat, action)
+        self.state, done, rewards, _ = self.engine.step(self.state, action)
         if done:
-            self._end_hand(rewards)
-            return
+            self._end_hand(rewards); return
         if self.state.next_to_act is None:
             done, rewards = self.engine.advance_round_if_needed(self.state)
             if done:
-                self._end_hand(rewards)
-                return
+                self._end_hand(rewards); return
         self._update_view()
 
+    # ----- end -----------------------------------------------------------
     def _end_hand(self, rewards: List[int]) -> None:
-        for i, lbl in enumerate(self.player_labels):
+        for i, pnl in enumerate(self.player_panels):
             p = self.state.players[i]
             hole = cards_str(list(p.hole)) if p.hole else "?? ??"
-            lbl.setText(lbl.text() + f" | hole={hole}")
+            pnl.hole.setText(hole)
         msg = "\n".join(f"Seat {i}: {r}" for i, r in enumerate(rewards))
         QtWidgets.QMessageBox.information(self, "Hand complete", msg)
         for btn in self.action_buttons.values():
             btn.setEnabled(False)
         self.raise_edit.setEnabled(False)
+        self.raise_slider.setEnabled(False)
         self.status_label.setText("Hand complete")
         self.timer.stop()
 
