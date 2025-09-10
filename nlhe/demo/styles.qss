@@ -3,42 +3,48 @@
 }
 
 #player-panel {
-    border: 2px solid black;
+    border: 2px solid #000000;
     border-radius: 8px;
-    background: #fcdcda;
-    color: black;
+    background-color: #ffffff;
+    color: #000000;
 }
 
 #player-panel[active="true"] {
-    border-color: #280401;
+    border-color: #ffeb3b;
 }
 
 #player-panel[state="folded"] {
-    background: #dddddd;
+    background-color: #9e9e9e;
+    color: #ffffff;
 }
 
 #player-panel[state="allin"] {
-    background: #ffddaa;
+    background-color: #d32f2f;
+    color: #ffffff;
 }
 
 #player-panel[state="called"] {
-    background: #cce0ff;
+    background-color: #1976d2;
+    color: #ffffff;
 }
 
 #player-panel[state="raised"] {
-    background: #c4f5c4;
+    background-color: #388e3c;
+    color: #ffffff;
 }
 
 QLabel#badge {
     border-radius: 12px;
     padding: 0 6px;
-    background: #333333;
-    color: white;
+    background-color: #212121;
+    color: #ffffff;
     font-weight: bold;
 }
 
 QLabel#status-label {
     border-radius: 4px;
     padding: 2px 4px;
-    background: #e0e0e0;
+    background-color: #424242;
+    color: #ffffff;
+    font-weight: bold;
 }
