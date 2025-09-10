@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
-from PyQt6 import QtCore, QtWidgets
+from PyQt6 import QtCore, QtWidgets, QtGui
 
 from ..core.types import Action, ActionType, GameState
 from .controller import GameController
@@ -115,6 +115,11 @@ class NLHEGui(QtWidgets.QMainWindow):
         self.next_hand_btn.setEnabled(False)
         self.next_hand_btn.clicked.connect(self._start_next_hand)
         seed_row.addWidget(self.next_hand_btn)
+
+    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # pragma: no cover - GUI
+        """Refresh layout when the window size changes."""
+        super().resizeEvent(event)
+        self._update_view()
 
     # ----- helpers -------------------------------------------------------
     def _last_action(self, seat: int) -> Optional[Tuple[int, int]]:
