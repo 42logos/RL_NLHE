@@ -133,7 +133,7 @@ def main() -> None:
     if not crate.exists():
         raise SystemExit(f"crate directory {crate!r} not found")
     module = args.module_name or get_crate_name(crate)
-    py = resolve_python(repo_root / args.venv)
+    py = resolve_python(repo_root / args.venv) 
 
     if args.use_maturin:
         build_with_maturin(py, crate, module)
