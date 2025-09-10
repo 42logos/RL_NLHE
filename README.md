@@ -160,9 +160,9 @@ $$
 $$
 
 The raise amount is computed as:
-$$
+$
 a_{\text{raise}} = \text{min\_raise} + r \cdot (\text{max\_raise} - \text{min\_raise})
-$$
+$
 
 ## 5. Project Applications and Contributions
 
