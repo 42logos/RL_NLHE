@@ -5,7 +5,7 @@ layout.  Community cards and pot sit in the middle while six ``PlayerPanel``
 widgets surround the table.  Each panel shows stack, bet, status, hole cards
 and last action with colour cues for folds, calls, raises and all-ins.  The
 acting seat receives a yellow border and the action bar exposes a raise slider
-interpreted as a *difference* over the current bet.
+that specifies the absolute amount to raise to.
 
 The demo is intentionally lightweight but demonstrates how to drive the
 ``NLHEngine`` interactively from a GUI application.
@@ -159,7 +159,7 @@ class NLHEGui(QtWidgets.QMainWindow):
 
         self.raise_edit = QtWidgets.QLineEdit()
         self.raise_edit.setFixedWidth(60)
-        self.raise_edit.setPlaceholderText("raise diff")
+        self.raise_edit.setPlaceholderText("raise to")
         btn_layout.addWidget(self.raise_edit)
 
         self.raise_info = QtWidgets.QLabel("")
@@ -230,19 +230,13 @@ class NLHEGui(QtWidgets.QMainWindow):
         if raise_allowed:
             self.min_raise_to = getattr(info, "min_raise_to", None)
             self.max_raise_to = getattr(info, "max_raise_to", None)
-            if self.min_raise_to is not None:
-                min_diff = self.min_raise_to - self.state.current_bet
-            else:
-                min_diff = 0
-            if self.max_raise_to is not None:
-                max_diff = self.max_raise_to - self.state.current_bet
-            else:
-                max_diff = min_diff
-            self.raise_slider.setMinimum(min_diff)
-            self.raise_slider.setMaximum(max_diff)
-            self.raise_slider.setValue(min_diff)
-            self.raise_edit.setText(str(min_diff))
-            self.raise_info.setText(f"[{min_diff}-{max_diff}]")
+            min_amt = self.min_raise_to if self.min_raise_to is not None else 0
+            max_amt = self.max_raise_to if self.max_raise_to is not None else min_amt
+            self.raise_slider.setMinimum(min_amt)
+            self.raise_slider.setMaximum(max_amt)
+            self.raise_slider.setValue(min_amt)
+            self.raise_edit.setText(str(min_amt))
+            self.raise_info.setText(f"[{min_amt}-{max_amt}]")
         else:
             self.raise_info.setText("")
 
@@ -285,24 +279,21 @@ class NLHEGui(QtWidgets.QMainWindow):
             action = Action(ActionType.CALL)
         elif name == "RAISE":
             try:
-                inc = int(self.raise_edit.text())
+                amt = int(self.raise_edit.text())
             except ValueError:
-                QtWidgets.QMessageBox.critical(self, "Invalid", "Enter raise increment")
+                QtWidgets.QMessageBox.critical(self, "Invalid", "Enter raise amount")
                 return
-            target = self.state.current_bet + inc
-            if self.min_raise_to is not None and target < self.min_raise_to:
-                need = self.min_raise_to - self.state.current_bet
+            if self.min_raise_to is not None and amt < self.min_raise_to:
                 QtWidgets.QMessageBox.critical(
-                    self, "Invalid", f"Minimum raise diff is {need}"
-                );
+                    self, "Invalid", f"Minimum raise is {self.min_raise_to}"
+                )
                 return
-            if self.max_raise_to is not None and target > self.max_raise_to:
-                cap = self.max_raise_to - self.state.current_bet
+            if self.max_raise_to is not None and amt > self.max_raise_to:
                 QtWidgets.QMessageBox.critical(
-                    self, "Invalid", f"Maximum raise diff is {cap}"
-                );
+                    self, "Invalid", f"Maximum raise is {self.max_raise_to}"
+                )
                 return
-            action = Action(ActionType.RAISE_TO, amount=target)
+            action = Action(ActionType.RAISE_TO, amount=amt)
         else:
             return
 
