@@ -1,4 +1,3 @@
-
 """PyQt6-based demo GUI for playing a single NLHE hand.
 
 This widget-heavy rewrite organises the table in a more conventional poker
@@ -16,170 +15,13 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
 
-from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6 import QtCore, QtWidgets
 
-from ..core.cards import rank_of, suit_of
-from ..core.types import Action, ActionType, GameState, PlayerState
+from ..core.types import Action, ActionType, GameState
 from .controller import GameController
+from .widgets import BoardWidget, PlayerPanel
 
 
-# ----- card helpers -------------------------------------------------------
-RSTR = {11: "J", 12: "Q", 13: "K", 14: "A"}
-SUIT = ["♣", "♦", "♥", "♠"]
-
-CARD_SIZE = QtCore.QSize(50, 70)
-
-
-def _card_text(c: int) -> Tuple[str, str, QtGui.QColor]:
-    r = rank_of(c)
-    s = suit_of(c)
-    rs = str(r) if r <= 10 else RSTR[r]
-    suit = SUIT[s]
-    color = QtGui.QColor("red") if s in (1, 2) else QtGui.QColor("black")
-    return rs, suit, color
-
-
-def card_pixmap(c: int) -> QtGui.QPixmap:
-    rs, suit, color = _card_text(c)
-    pix = QtGui.QPixmap(CARD_SIZE)
-    pix.fill(QtGui.QColor("white"))
-    p = QtGui.QPainter(pix)
-    p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-    p.setPen(QtGui.QPen(QtGui.QColor("black")))
-    p.drawRect(0, 0, CARD_SIZE.width() - 1, CARD_SIZE.height() - 1)
-    font = p.font()
-    font.setBold(True)
-    p.setFont(font)
-    p.setPen(color)
-    p.drawText(pix.rect(), QtCore.Qt.AlignmentFlag.AlignCenter, f"{rs}\n{suit}")
-    p.end()
-    return pix
-
-
-def card_back_pixmap() -> QtGui.QPixmap:
-    pix = QtGui.QPixmap(CARD_SIZE)
-    pix.fill(QtGui.QColor("#0b5fa5"))
-    p = QtGui.QPainter(pix)
-    p.setPen(QtGui.QPen(QtGui.QColor("white")))
-    p.drawRect(0, 0, CARD_SIZE.width() - 1, CARD_SIZE.height() - 1)
-    p.end()
-    return pix
-
-
-def chip_pixmap() -> QtGui.QPixmap:
-    size = 20
-    pix = QtGui.QPixmap(size, size)
-    pix.fill(QtCore.Qt.GlobalColor.transparent)
-    p = QtGui.QPainter(pix)
-    p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-    p.setBrush(QtGui.QColor("#d43333"))
-    p.drawEllipse(0, 0, size - 1, size - 1)
-    p.setPen(QtGui.QPen(QtGui.QColor("white"), 2))
-    p.drawEllipse(3, 3, size - 7, size - 7)
-    p.end()
-    return pix
-
-
-# ----- player widget ------------------------------------------------------
-class PlayerPanel(QtWidgets.QFrame):
-    """Visual representation of a single player's public state."""
-
-    def __init__(self, seat: int) -> None:
-        super().__init__()
-        self.seat = seat
-        self.setFrameShape(QtWidgets.QFrame.Shape.Box)
-        lay = QtWidgets.QVBoxLayout(self)
-        lay.setContentsMargins(4, 4, 4, 4)
-
-        info_row = QtWidgets.QHBoxLayout()
-        self.seat_label = QtWidgets.QLabel(str(seat))
-        self.seat_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.seat_label.setFixedSize(24, 24)
-        self.seat_label.setStyleSheet(
-            "border-radius:12px; background:#333333; color:white;"
-        )
-        info_row.addWidget(self.seat_label)
-        self.stack_label = QtWidgets.QLabel("Stack 0")
-        info_row.addWidget(self.stack_label)
-        chip = QtWidgets.QLabel()
-        chip.setPixmap(chip_pixmap())
-        info_row.addWidget(chip)
-        self.bet_label = QtWidgets.QLabel("Bet 0")
-        info_row.addWidget(self.bet_label)
-        lay.addLayout(info_row)
-
-        cards_row = QtWidgets.QHBoxLayout()
-        self.card_labels: List[QtWidgets.QLabel] = []
-        for _ in range(2):
-            lbl = QtWidgets.QLabel()
-            lbl.setFixedSize(CARD_SIZE)
-            lbl.setPixmap(card_back_pixmap())
-            cards_row.addWidget(lbl)
-            self.card_labels.append(lbl)
-        lay.addLayout(cards_row)
-
-        self.last = QtWidgets.QLabel("")
-        lay.addWidget(self.last)
-
-        self._opacity = QtWidgets.QGraphicsOpacityEffect(self)
-        self.setGraphicsEffect(self._opacity)
-        self._bet_effect = QtWidgets.QGraphicsOpacityEffect(self.bet_label)
-        self.bet_label.setGraphicsEffect(self._bet_effect)
-        self._last_bet = 0
-
-    def _animate_bet(self) -> None:
-        anim = QtCore.QPropertyAnimation(self._bet_effect, b"opacity")
-        anim.setDuration(600)
-        anim.setStartValue(0.0)
-        anim.setEndValue(1.0)
-        anim.start(QtCore.QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
-
-    def update(self, p: PlayerState, hero: bool,
-               active: bool, last: Optional[Tuple[int, int]]) -> None:
-        if hero and p.hole:
-            holes = list(p.hole)
-        else:
-            holes = []
-        for i, lbl in enumerate(self.card_labels):
-            if i < len(holes):
-                lbl.setPixmap(card_pixmap(holes[i]))
-            else:
-                lbl.setPixmap(card_back_pixmap())
-
-        self.stack_label.setText(f"Stack {p.stack}")
-        self.bet_label.setText(f"Bet {p.bet}")
-        if p.bet > self._last_bet:
-            self._animate_bet()
-        self._last_bet = p.bet
-
-        last_txt = ""
-        bg = "#fcdcda"
-        if p.status == "folded":
-            bg = "#dddddd"
-            last_txt = "fold"
-        elif p.status == "allin":
-            bg = "#ffddaa"
-            last_txt = "all-in"
-        elif last is not None:
-            aid, amt = last
-            if aid == 1:
-                last_txt = "check"
-            elif aid == 2:
-                last_txt = "call"; bg = "#cce0ff"
-            elif aid == 3:
-                last_txt = f"raise to {amt}"; bg = "#c4f5c4"
-            else:
-                last_txt = "fold"; bg = "#dddddd"
-        self.last.setText(last_txt)
-
-        border = "#280401" if active else "black"
-        self.setStyleSheet(
-            f"border: 2px solid {border}; color: black; background-color: {bg};"
-        )
-        self._opacity.setOpacity(1.0 if active else 0.6)
-
-
-# ----- main window --------------------------------------------------------
 class NLHEGui(QtWidgets.QMainWindow):
     """Play a single 6-max NLHE hand against basic random agents."""
 
@@ -198,11 +40,12 @@ class NLHEGui(QtWidgets.QMainWindow):
 
     # ----- construction --------------------------------------------------
     def _create_widgets(self) -> None:
-        central = QtWidgets.QWidget(self); self.setCentralWidget(central)
+        central = QtWidgets.QWidget(self)
+        self.setCentralWidget(central)
         main = QtWidgets.QVBoxLayout(central)
 
-        # table layout
-        grid = QtWidgets.QGridLayout(); main.addLayout(grid)
+        grid = QtWidgets.QGridLayout()
+        main.addLayout(grid)
         pos = {0: (2, 1), 1: (1, 2), 2: (0, 2), 3: (0, 1), 4: (0, 0), 5: (1, 0)}
 
         self.player_panels: List[PlayerPanel] = []
@@ -211,23 +54,17 @@ class NLHEGui(QtWidgets.QMainWindow):
             self.player_panels.append(panel)
             grid.addWidget(panel, *pos[seat])
 
-        center = QtWidgets.QWidget(); grid.addWidget(center, 1, 1)
+        center = QtWidgets.QWidget()
+        grid.addWidget(center, 1, 1)
         cl = QtWidgets.QVBoxLayout(center)
         cl.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        board_row = QtWidgets.QHBoxLayout()
-        self.board_cards: List[QtWidgets.QLabel] = []
-        for _ in range(5):
-            lbl = QtWidgets.QLabel()
-            lbl.setFixedSize(CARD_SIZE)
-            lbl.setPixmap(card_back_pixmap())
-            board_row.addWidget(lbl)
-            self.board_cards.append(lbl)
-        cl.addLayout(board_row)
+        self.board = BoardWidget()
+        cl.addWidget(self.board)
         self.pot_label = QtWidgets.QLabel("Pot: 0")
         cl.addWidget(self.pot_label, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)
 
-        # action bar
-        btn_layout = QtWidgets.QHBoxLayout(); main.addLayout(btn_layout)
+        btn_layout = QtWidgets.QHBoxLayout()
+        main.addLayout(btn_layout)
         self.action_buttons: Dict[str, QtWidgets.QPushButton] = {}
         for name in ["FOLD", "CHECK", "CALL", "RAISE"]:
             btn = QtWidgets.QPushButton(name)
@@ -258,7 +95,8 @@ class NLHEGui(QtWidgets.QMainWindow):
         self.log.setFixedHeight(120)
         main.addWidget(self.log)
 
-        seed_row = QtWidgets.QHBoxLayout(); main.addLayout(seed_row)
+        seed_row = QtWidgets.QHBoxLayout()
+        main.addLayout(seed_row)
         seed_row.addWidget(QtWidgets.QLabel("Seed:"))
         self.seed_edit = QtWidgets.QLineEdit(str(self.controller.seed_val))
         self.seed_edit.setFixedWidth(80)
@@ -290,23 +128,19 @@ class NLHEGui(QtWidgets.QMainWindow):
         self._update_view()
 
     def _update_view(self) -> None:
-        # board and pot
         state = self.controller.state
-        for i, lbl in enumerate(self.board_cards):
-            if i < len(state.board):
-                lbl.setPixmap(card_pixmap(state.board[i]))
-            else:
-                lbl.setPixmap(card_back_pixmap())
+        self.board.update(state.board)
         self.pot_label.setText(f"Pot: {state.pot}")
 
-        # players
         for i, pnl in enumerate(self.player_panels):
             p = state.players[i]
-            pnl.update(p, i == self.hero_seat,
-                       state.next_to_act == i,
-                       self._last_action(i))
+            pnl.update(
+                p,
+                i == self.hero_seat,
+                state.next_to_act == i,
+                self._last_action(i),
+            )
 
-        # status and action availability
         if state.next_to_act is not None:
             seat = state.next_to_act
             to_call = state.current_bet - state.players[seat].bet
@@ -340,7 +174,6 @@ class NLHEGui(QtWidgets.QMainWindow):
         else:
             self.raise_info.setText("")
 
-
     # ----- user actions --------------------------------------------------
     def _on_action(self, name: str) -> None:
         if self.controller.state.next_to_act != self.hero_seat:
@@ -355,7 +188,9 @@ class NLHEGui(QtWidgets.QMainWindow):
             try:
                 amt = int(self.raise_edit.text())
             except ValueError:
-                QtWidgets.QMessageBox.critical(self, "Invalid", "Enter raise amount")
+                QtWidgets.QMessageBox.critical(
+                    self, "Invalid", "Enter raise amount"
+                )
                 return
             if self.min_raise_to is not None and amt < self.min_raise_to:
                 QtWidgets.QMessageBox.critical(
@@ -379,10 +214,7 @@ class NLHEGui(QtWidgets.QMainWindow):
         for i, pnl in enumerate(self.player_panels):
             p = state.players[i]
             for j, lbl in enumerate(pnl.card_labels):
-                if p.hole and j < len(p.hole):
-                    lbl.setPixmap(card_pixmap(p.hole[j]))
-                else:
-                    lbl.setPixmap(card_back_pixmap())
+                lbl.set_card(p.hole[j] if p.hole and j < len(p.hole) else None)
         msg = "\n".join(f"Seat {i}: {r}" for i, r in enumerate(rewards))
         QtWidgets.QMessageBox.information(self, "Hand complete", msg)
         for btn in self.action_buttons.values():
@@ -426,4 +258,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
