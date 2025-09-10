@@ -1,0 +1,44 @@
+* {
+    font-family: "Segoe UI", sans-serif;
+}
+
+#player-panel {
+    border: 2px solid black;
+    border-radius: 8px;
+    background: #fcdcda;
+    color: black;
+}
+
+#player-panel[active="true"] {
+    border-color: #280401;
+}
+
+#player-panel[state="folded"] {
+    background: #dddddd;
+}
+
+#player-panel[state="allin"] {
+    background: #ffddaa;
+}
+
+#player-panel[state="called"] {
+    background: #cce0ff;
+}
+
+#player-panel[state="raised"] {
+    background: #c4f5c4;
+}
+
+QLabel#badge {
+    border-radius: 12px;
+    padding: 0 6px;
+    background: #333333;
+    color: white;
+    font-weight: bold;
+}
+
+QLabel#status-label {
+    border-radius: 4px;
+    padding: 2px 4px;
+    background: #e0e0e0;
+}
