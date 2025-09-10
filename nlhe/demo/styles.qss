@@ -5,8 +5,8 @@
 #player-panel {
     border: 2px solid #000000;
     border-radius: 8px;
-    background-color: #ffffff;
-    color: #000000;
+    background-color: #4c5f54ff;
+    color: #000000ff;
 }
 
 #player-panel[active="true"] {
@@ -24,19 +24,19 @@
 }
 
 #player-panel[state="called"] {
-    background-color: #1976d2;
+    background-color: #4c5f54ff;
     color: #ffffff;
 }
 
 #player-panel[state="raised"] {
-    background-color: #388e3c;
+    background-color: #ea9c28ff;
     color: #ffffff;
 }
 
 QLabel#badge {
     border-radius: 12px;
     padding: 0 6px;
-    background-color: #212121;
+    background-color: #049c46ff;
     color: #ffffff;
     font-weight: bold;
 }
@@ -44,7 +44,7 @@ QLabel#badge {
 QLabel#status-label {
     border-radius: 4px;
     padding: 2px 4px;
-    background-color: #424242;
+    background-color: #8f049cff;
     color: #ffffff;
     font-weight: bold;
 }
