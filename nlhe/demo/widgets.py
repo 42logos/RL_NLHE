@@ -149,19 +149,30 @@ class PlayerPanel(QtWidgets.QFrame):
         lay.setContentsMargins(4, 4, 4, 4)
 
         info_row = QtWidgets.QHBoxLayout()
-        self.seat_label = QtWidgets.QLabel(str(seat))
+        info_row.setContentsMargins(0, 0, 0, 0)
+        info_row.setSpacing(4)
+
+        # Seat indicator shown once with text
+        self.seat_label = QtWidgets.QLabel(f"Seat {seat}")
         self.seat_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.seat_label.setFixedSize(24, 24)
+        self.seat_label.setFixedHeight(24)
         self.seat_label.setStyleSheet(
-            "border-radius:12px; background:#333333; color:white;",
+            "border-radius:12px; padding:0 6px; background:#333333; color:white;",
         )
         info_row.addWidget(self.seat_label)
-        self.seat_text = QtWidgets.QLabel(f"Seat {seat}")
-        info_row.addWidget(self.seat_text)
+
+        info_row.addStretch(1)
+
         self.stack_label = QtWidgets.QLabel("Stack 0")
+        self.stack_label.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Fixed,
+            QtWidgets.QSizePolicy.Policy.Preferred,
+        )
         info_row.addWidget(self.stack_label)
+
         self.bet_chip = BetChip()
         info_row.addWidget(self.bet_chip)
+
         lay.addLayout(info_row)
 
         cards_row = QtWidgets.QHBoxLayout()
