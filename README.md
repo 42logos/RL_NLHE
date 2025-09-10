@@ -93,10 +93,10 @@ $$
 
 The action space $\mathcal{A}$ is defined by the ActionType enumeration:
 
-- $\text{FOLD}$: Player forfeits hand, $u_i = -c_i$
-- $\text{CHECK}$: Pass action, requires $b_i = c_b$
-- $\text{CALL}$: Match current bet, amount = $\max(0, c_b - b_i)$
-- $\text{RAISE\_TO}$: Increase bet to amount $a$, with constraints:
+- **FOLD**: Player forfeits hand, $u_i = -c_i$
+- **CHECK**: Pass action, requires $b_i = c_b$
+- **CALL**: Match current bet, where the amount is $\max(0, c_b - b_i)$
+- **RAISE_TO**: Increase bet to amount $a$, with constraints:
   $$
   a > c_b \quad \text{and} \quad a \leq b_i + s_i
   $$
