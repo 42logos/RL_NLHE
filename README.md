@@ -97,12 +97,14 @@ The action space $\mathcal{A}$ is defined by the ActionType enumeration:
 - **CHECK**: Pass action, requires $b_i = c_b$
 - **CALL**: Match current bet, where the amount is $\max(0, c_b - b_i)$
 - **RAISE_TO**: Increase bet to amount $a$, with constraints:
-  $$
-  a > c_b \quad \text{and} \quad a \leq b_i + s_i
-  $$
-  $$
-  a \geq c_b + m_r \quad \text{unless} \quad a = b_i + s_i \text{ (all-in)}
-  $$
+
+$$
+a > c_b \quad \text{and} \quad a \leq b_i + s_i
+$$
+
+$$
+a \geq c_b + m_r \quad \text{unless} \quad a = b_i + s_i \text{ (all-in)}
+$$
 
 ### 3.3 Hand Evaluation Theory
 
@@ -160,9 +162,13 @@ $$
 $$
 
 The raise amount is computed as:
-$
-a_{\text{raise}} = \text{min\_raise} + r \cdot (\text{max\_raise} - \text{min\_raise})
-$
+
+$$
+\mathbf{a}_{\text{raise}}
+= \mathrm{min\_raise} + r \cdot \big(\mathrm{max\_raise} - \mathrm{min\_raise}\big)
+$$
+
+
 
 ## 5. Project Applications and Contributions
 
