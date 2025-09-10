@@ -93,30 +93,57 @@ class ChipLabel(QtWidgets.QLabel):
         self.setPixmap(self.pixmap())
 
 
-class BetChip(QtWidgets.QLabel):
-    """Chip-style label showing the player's current bet with animation."""
+class BetChip(QtWidgets.QWidget):
+    """Chip-style widget showing the player's current bet with animation."""
+
+    BASE = 32
 
     def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
         super().__init__(parent)
-        self._base = 32
-        self._apply_size(self._base)
-        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.setStyleSheet(
-            "border-radius:16px; background:#d43333; color:white; font-weight:bold;",
-        )
+        self.setObjectName("bet-chip")
+        self._amount = 0
+        self._size = self.BASE
+        self._apply_size(self._size)
         self._effect = QtWidgets.QGraphicsOpacityEffect(self)
         self.setGraphicsEffect(self._effect)
         self._effect.setOpacity(1.0)
 
+    def reserve_size(self) -> int:
+        return int(self.BASE * 1.6)
+
     def _apply_size(self, s: int) -> None:
+        self._size = s
         self.setFixedSize(s, s)
-        font = self.font()
-        font.setPointSize(max(8, int(s / 2)))
-        self.setFont(font)
+        self.update()
 
     def set_amount(self, amt: int) -> None:
-        self.setText(str(amt))
+        self._amount = amt
         self.setVisible(amt > 0)
+        self.update()
+
+    def paintEvent(self, evt: QtGui.QPaintEvent) -> None:  # noqa: N802
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        r = self.rect().adjusted(0, 0, -1, -1)
+        p.setBrush(QtGui.QColor("#d43333"))
+        p.setPen(QtGui.QPen(QtGui.QColor("white"), 2))
+        p.drawEllipse(r)
+        p.setPen(QtGui.QPen(QtGui.QColor("white"), 2))
+        p.drawEllipse(r.adjusted(3, 3, -3, -3))
+        p.setBrush(QtGui.QColor("white"))
+        for i in range(4):
+            p.save()
+            p.translate(r.center())
+            p.rotate(45 + i * 90)
+            p.drawRect(-2, -r.height() / 2 + 1, 4, 8)
+            p.restore()
+        font = p.font()
+        font.setBold(True)
+        font.setPointSize(max(8, int(self._size / 2)))
+        p.setFont(font)
+        p.setPen(QtGui.QColor("white"))
+        p.drawText(self.rect(), QtCore.Qt.AlignmentFlag.AlignCenter, str(self._amount))
+        p.end()
 
     def animate(self) -> None:
         self._effect.setOpacity(0.0)
@@ -129,8 +156,8 @@ class BetChip(QtWidgets.QLabel):
 
         scale = QtCore.QVariantAnimation(self)
         scale.setDuration(500)
-        scale.setStartValue(self._base * 1.4)
-        scale.setEndValue(self._base)
+        scale.setStartValue(self.BASE * 1.4)
+        scale.setEndValue(self.BASE)
         scale.valueChanged.connect(lambda v: self._apply_size(int(v)))
 
         group.addAnimation(fade)
@@ -170,9 +197,10 @@ class PlayerPanel(QtWidgets.QFrame):
         info_row.addWidget(self.stack_label)
 
         self.bet_chip = BetChip()
-        # Reserve space for bet chip so stack label doesn't shift when it appears
+        # Reserve space for bet chip so stack label doesn't shift or overlap
         self.bet_box = QtWidgets.QWidget()
-        self.bet_box.setFixedSize(self.bet_chip.size())
+        reserve = self.bet_chip.reserve_size()
+        self.bet_box.setFixedSize(reserve, reserve)
         bet_lay = QtWidgets.QHBoxLayout(self.bet_box)
         bet_lay.setContentsMargins(0, 0, 0, 0)
         bet_lay.addWidget(self.bet_chip)
