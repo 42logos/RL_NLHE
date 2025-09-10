@@ -69,27 +69,29 @@ class PlayerPanel(QtWidgets.QFrame):
         )
 
         last_txt = ""
-        colour = "black"
+        bg = "white"
         if p.status == "folded":
-            colour = "grey"
+            bg = "#dddddd"
             last_txt = "fold"
         elif p.status == "allin":
-            colour = "orange"
+            bg = "#ffddaa"
             last_txt = "all-in"
         elif last is not None:
             aid, amt = last
             if aid == 1:
                 last_txt = "check"
             elif aid == 2:
-                last_txt = "call"; colour = "blue"
+                last_txt = "call"; bg = "#cce0ff"
             elif aid == 3:
-                last_txt = f"raise to {amt}"; colour = "green"
+                last_txt = f"raise to {amt}"; bg = "#c4f5c4"
             else:
-                last_txt = "fold"; colour = "grey"
+                last_txt = "fold"; bg = "#dddddd"
         self.last.setText(last_txt)
 
         border = "yellow" if active else "black"
-        self.setStyleSheet(f"border: 2px solid {border}; color: {colour};")
+        self.setStyleSheet(
+            f"border: 2px solid {border}; color: black; background-color: {bg};"
+        )
         self._opacity.setOpacity(1.0 if active else 0.6)
 
 
@@ -102,6 +104,7 @@ class NLHEGui(QtWidgets.QMainWindow):
         self.setWindowTitle("NLHE 6-Max GUI")
 
         self.hero_seat = hero_seat
+        self.seed_val = seed
         self.rng = random.Random(seed)
         self.engine = NLHEngine(sb=1, bb=2, start_stack=100, rng=self.rng)
         self.agents: List[TamedRandomAgent | None] = [
@@ -172,6 +175,16 @@ class NLHEGui(QtWidgets.QMainWindow):
         self.log.setReadOnly(True)
         self.log.setFixedHeight(120)
         main.addWidget(self.log)
+
+        seed_row = QtWidgets.QHBoxLayout(); main.addLayout(seed_row)
+        seed_row.addWidget(QtWidgets.QLabel("Seed:"))
+        self.seed_edit = QtWidgets.QLineEdit(str(self.seed_val))
+        self.seed_edit.setFixedWidth(80)
+        seed_row.addWidget(self.seed_edit)
+        self.next_hand_btn = QtWidgets.QPushButton("Next Hand")
+        self.next_hand_btn.setEnabled(False)
+        self.next_hand_btn.clicked.connect(self._start_next_hand)
+        seed_row.addWidget(self.next_hand_btn)
 
     # ----- helpers -------------------------------------------------------
     def _last_action(self, seat: int) -> Optional[Tuple[int, int]]:
@@ -321,11 +334,39 @@ class NLHEGui(QtWidgets.QMainWindow):
         self.raise_slider.setEnabled(False)
         self.status_label.setText("Hand complete")
         self.timer.stop()
+        self.next_hand_btn.setEnabled(True)
+
+    def _start_next_hand(self) -> None:
+        try:
+            seed = int(self.seed_edit.text())
+        except ValueError:
+            seed = random.randrange(1 << 30)
+            self.seed_edit.setText(str(seed))
+        self.seed_val = seed
+        self.rng.seed(seed)
+        button = (self.state.button + 1) % self.engine.N
+        self.state = self.engine.reset_hand(button=button)
+        self.log.clear()
+        for btn in self.action_buttons.values():
+            btn.setEnabled(True)
+        self.raise_edit.setEnabled(True)
+        self.raise_slider.setEnabled(True)
+        self.next_hand_btn.setEnabled(False)
+        self.timer.start()
+        self._update_view()
 
 
 def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="NLHE GUI demo")
+    parser.add_argument("--hero-seat", type=int, default=0,
+                        help="human seat index (0-5)")
+    parser.add_argument("--seed", type=int, default=42, help="RNG seed")
+    args = parser.parse_args()
+
     app = QtWidgets.QApplication([])
-    gui = NLHEGui(hero_seat=0, seed=42)
+    gui = NLHEGui(hero_seat=args.hero_seat, seed=args.seed)
     gui.show()
     app.exec()
 
