@@ -20,80 +20,9 @@ from typing import Dict, List, Optional, Tuple
 from PyQt6 import QtCore, QtWidgets
 
 from ..agents.tamed_random import TamedRandomAgent
-from ..core.cards import rank_of, suit_of
 from ..core.engine import NLHEngine
 from ..core.types import Action, ActionType, GameState, PlayerState
-
-
-# ----- card helpers -------------------------------------------------------
-RSTR = {11: "J", 12: "Q", 13: "K", 14: "A"}
-SUIT = ["♣", "♦", "♥", "♠"]
-
-
-def card_str(c: int) -> str:
-    r = rank_of(c); s = suit_of(c)
-    rs = str(r) if r <= 10 else RSTR[r]
-    return f"{rs}{SUIT[s]}"
-
-
-def cards_str(cards: List[int]) -> str:
-    return " ".join(card_str(c) for c in cards)
-
-
-# ----- player widget ------------------------------------------------------
-class PlayerPanel(QtWidgets.QFrame):
-    """Visual representation of a single player's public state."""
-
-    def __init__(self, seat: int) -> None:
-        super().__init__()
-        self.seat = seat
-        self.setFrameShape(QtWidgets.QFrame.Shape.Box)
-        lay = QtWidgets.QVBoxLayout(self)
-        lay.setContentsMargins(4, 4, 4, 4)
-
-        self.info = QtWidgets.QLabel(f"Seat {seat}")
-        self.hole = QtWidgets.QLabel("?? ??")
-        self.last = QtWidgets.QLabel("")
-        lay.addWidget(self.info)
-        lay.addWidget(self.hole)
-        lay.addWidget(self.last)
-
-        self._opacity = QtWidgets.QGraphicsOpacityEffect(self)
-        self.setGraphicsEffect(self._opacity)
-
-    def update(self, p: PlayerState, hero: bool,
-               active: bool, last: Optional[Tuple[int, int]]) -> None:
-        hole = cards_str(list(p.hole)) if hero and p.hole else "?? ??"
-        self.hole.setText(hole)
-        self.info.setText(
-            f"Stack {p.stack} | Bet {p.bet} | Cont {p.cont} | {p.status}"
-        )
-
-        last_txt = ""
-        bg = "#fcdcda"
-        if p.status == "folded":
-            bg = "#dddddd"
-            last_txt = "fold"
-        elif p.status == "allin":
-            bg = "#ffddaa"
-            last_txt = "all-in"
-        elif last is not None:
-            aid, amt = last
-            if aid == 1:
-                last_txt = "check"
-            elif aid == 2:
-                last_txt = "call"; bg = "#cce0ff"
-            elif aid == 3:
-                last_txt = f"raise to {amt}"; bg = "#c4f5c4"
-            else:
-                last_txt = "fold"; bg = "#dddddd"
-        self.last.setText(last_txt)
-
-        border = "#280401" if active else "black"
-        self.setStyleSheet(
-            f"border: 2px solid {border}; color: black; background-color: {bg};"
-        )
-        self._opacity.setOpacity(1.0 if active else 0.6)
+from .widgets import BoardWidget, PlayerPanel
 
 
 # ----- main window --------------------------------------------------------
@@ -140,9 +69,9 @@ class NLHEGui(QtWidgets.QMainWindow):
         center = QtWidgets.QWidget(); grid.addWidget(center, 1, 1)
         cl = QtWidgets.QVBoxLayout(center)
         cl.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.board_label = QtWidgets.QLabel("Board: (preflop)")
+        self.board_widget = BoardWidget()
         self.pot_label = QtWidgets.QLabel("Pot: 0")
-        cl.addWidget(self.board_label, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)
+        cl.addWidget(self.board_widget, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)
         cl.addWidget(self.pot_label, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)
 
         # action bar
@@ -207,10 +136,7 @@ class NLHEGui(QtWidgets.QMainWindow):
 
     def _update_view(self) -> None:
         # board and pot
-        if self.state.board:
-            self.board_label.setText(f"Board: {cards_str(self.state.board)}")
-        else:
-            self.board_label.setText("Board: (preflop)")
+        self.board_widget.set_cards(self.state.board)
         self.pot_label.setText(f"Pot: {self.state.pot}")
 
         # players
@@ -325,8 +251,7 @@ class NLHEGui(QtWidgets.QMainWindow):
     def _end_hand(self, rewards: List[int]) -> None:
         for i, pnl in enumerate(self.player_panels):
             p = self.state.players[i]
-            hole = cards_str(list(p.hole)) if p.hole else "?? ??"
-            pnl.hole.setText(hole)
+            pnl.reveal(list(p.hole))
         msg = "\n".join(f"Seat {i}: {r}" for i, r in enumerate(rewards))
         QtWidgets.QMessageBox.information(self, "Hand complete", msg)
         for btn in self.action_buttons.values():
