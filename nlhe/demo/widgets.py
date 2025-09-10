@@ -144,6 +144,7 @@ class PlayerPanel(QtWidgets.QFrame):
     def __init__(self, seat: int) -> None:
         super().__init__()
         self.seat = seat
+        self.setObjectName("player-panel")
         self.setFrameShape(QtWidgets.QFrame.Shape.Box)
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(4, 4, 4, 4)
@@ -156,9 +157,7 @@ class PlayerPanel(QtWidgets.QFrame):
         self.seat_label = QtWidgets.QLabel(f"Seat {seat}")
         self.seat_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.seat_label.setFixedHeight(24)
-        self.seat_label.setStyleSheet(
-            "border-radius:12px; padding:0 6px; background:#333333; color:white;",
-        )
+        self.seat_label.setObjectName("badge")
         info_row.addWidget(self.seat_label)
 
         info_row.addStretch(1)
@@ -171,7 +170,13 @@ class PlayerPanel(QtWidgets.QFrame):
         info_row.addWidget(self.stack_label)
 
         self.bet_chip = BetChip()
-        info_row.addWidget(self.bet_chip)
+        # Reserve space for bet chip so stack label doesn't shift when it appears
+        self.bet_box = QtWidgets.QWidget()
+        self.bet_box.setFixedSize(self.bet_chip.size())
+        bet_lay = QtWidgets.QHBoxLayout(self.bet_box)
+        bet_lay.setContentsMargins(0, 0, 0, 0)
+        bet_lay.addWidget(self.bet_chip)
+        info_row.addWidget(self.bet_box)
 
         lay.addLayout(info_row)
 
@@ -182,6 +187,7 @@ class PlayerPanel(QtWidgets.QFrame):
         lay.addLayout(cards_row)
 
         self.last = QtWidgets.QLabel("")
+        self.last.setObjectName("status-label")
         lay.addWidget(self.last)
 
         self._last_bet = 0
@@ -204,29 +210,34 @@ class PlayerPanel(QtWidgets.QFrame):
         self._last_bet = p.bet
 
         last_txt = ""
-        bg = "#fcdcda"
+        state = "default"
         if p.status == "folded":
-            bg = "#dddddd"
+            state = "folded"
             last_txt = "fold"
         elif p.status == "allin":
-            bg = "#ffddaa"
+            state = "allin"
             last_txt = "all-in"
         elif last is not None:
             aid, amt = last
             if aid == 1:
                 last_txt = "check"
             elif aid == 2:
-                last_txt = "call"; bg = "#cce0ff"
+                state = "called"
+                last_txt = "call"
             elif aid == 3:
-                last_txt = f"raise to {amt}"; bg = "#c4f5c4"
+                state = "raised"
+                last_txt = f"raise to {amt}"
             else:
-                last_txt = "fold"; bg = "#dddddd"
+                state = "folded"
+                last_txt = "fold"
         self.last.setText(last_txt)
 
-        border = "#280401" if active else "black"
-        self.setStyleSheet(
-            f"border: 2px solid {border}; color: black; background-color: {bg};",
-        )
+        self.setProperty("active", active)
+        self.setProperty("state", state)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        # call QWidget.update to refresh after re-polishing style
+        super().update()
 
 
 class BoardWidget(QtWidgets.QWidget):
