@@ -1,3 +1,4 @@
+
 """PyQt6-based demo GUI for playing a single NLHE hand.
 
 This widget-heavy rewrite organises the table in a more conventional poker
@@ -88,7 +89,7 @@ class PlayerPanel(QtWidgets.QFrame):
                 last_txt = "fold"; bg = "#dddddd"
         self.last.setText(last_txt)
 
-        border = "#2d0000" if active else "black"
+        border = "#280401" if active else "black"
         self.setStyleSheet(
             f"border: 2px solid {border}; color: black; background-color: {bg};"
         )
@@ -334,6 +335,10 @@ class NLHEGui(QtWidgets.QMainWindow):
         self.raise_slider.setEnabled(False)
         self.status_label.setText("Hand complete")
         self.timer.stop()
+        # derive a fresh seed for the next hand so card order changes
+        new_seed = random.Random(self.seed_val).randrange(1 << 30)
+        self.seed_val = new_seed
+        self.seed_edit.setText(str(new_seed))
         self.next_hand_btn.setEnabled(True)
 
     def _start_next_hand(self) -> None:
@@ -373,3 +378,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
