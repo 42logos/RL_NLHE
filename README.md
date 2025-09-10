@@ -162,8 +162,10 @@ $$
 The raise amount is computed as:
 
 $$
-\mathbf{a}_{\text{raise}} = \text{min\_raise} + r \cdot (\text{max\_raise} - \text{min\_raise})
+\mathbf{a}_{\text{raise}}
+= \text{min\_raise} + r \cdot \big(\text{max\_raise} - \text{min\_raise}\big)
 $$
+
 
 
 ## 5. Project Applications and Contributions
