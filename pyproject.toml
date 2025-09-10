@@ -30,8 +30,7 @@ dependencies = [
     "alembic>=1.16.5",
     "tomli>=2.2.1",
     "pytest>=8.4.2",
-    "pyside6>=6.9.2",
-    "pyqt6>=6.9.1",
+    "PyQt6>=6.7",
 ]
 
 
