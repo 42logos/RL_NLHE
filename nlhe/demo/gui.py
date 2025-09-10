@@ -69,7 +69,7 @@ class PlayerPanel(QtWidgets.QFrame):
         )
 
         last_txt = ""
-        bg = "white"
+        bg = "#fcdcda"
         if p.status == "folded":
             bg = "#dddddd"
             last_txt = "fold"
@@ -88,7 +88,7 @@ class PlayerPanel(QtWidgets.QFrame):
                 last_txt = "fold"; bg = "#dddddd"
         self.last.setText(last_txt)
 
-        border = "yellow" if active else "black"
+        border = "#2d0000" if active else "black"
         self.setStyleSheet(
             f"border: 2px solid {border}; color: black; background-color: {bg};"
         )
