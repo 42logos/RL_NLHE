@@ -129,8 +129,6 @@ class PlayerPanel(QtWidgets.QFrame):
         self.last = QtWidgets.QLabel("")
         lay.addWidget(self.last)
 
-        self._opacity = QtWidgets.QGraphicsOpacityEffect(self)
-        self.setGraphicsEffect(self._opacity)
         self._bet_effect = QtWidgets.QGraphicsOpacityEffect(self.round_label)
         self.round_label.setGraphicsEffect(self._bet_effect)
         self._last_bet = 0
@@ -183,7 +181,6 @@ class PlayerPanel(QtWidgets.QFrame):
         self.setStyleSheet(
             f"border: 2px solid {border}; color: black; background-color: {bg};",
         )
-        self._opacity.setOpacity(1.0 if active else 0.6)
 
 
 class BoardWidget(QtWidgets.QWidget):
