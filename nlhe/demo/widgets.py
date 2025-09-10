@@ -230,7 +230,8 @@ class PlayerPanel(QtWidgets.QFrame):
         self.setProperty("state", state)
         self.style().unpolish(self)
         self.style().polish(self)
-        self.update()
+        # call QWidget.update to refresh after re-polishing style
+        super().update()
 
 
 class BoardWidget(QtWidgets.QWidget):
