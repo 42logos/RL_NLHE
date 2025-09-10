@@ -266,6 +266,25 @@ python nlhe/build_rust.py --use-maturin --crate-dir nlhe_eval
 python nlhe/build_rust.py --use-maturin --crate-dir rs_engine
 ```
 
+### 7.3 Building with Virtual Environment and Maturin
+
+For development and research use, it's recommended to set up a Python virtual environment to manage dependencies:
+
+```bash
+# Create and activate a virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -e .[dev]
+
+# Build Rust components using maturin
+cd nlhe/nlhe_eval && maturin develop && cd ../..
+cd nlhe/rs_engine && maturin develop && cd ../..
+```
+
+This approach ensures a clean isolation of dependencies and allows for easy management of the development environment.
+
 ## 8. Experimental Methodology
 
 ### 8.1 Reproducibility Guidelines
