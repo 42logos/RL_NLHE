@@ -95,6 +95,9 @@ class NLHEGui(QtWidgets.QMainWindow):
 
         self.status_label = QtWidgets.QLabel("")
         self.status_label.setObjectName("status-label")
+        self.status_label.setAttribute(
+            QtCore.Qt.WidgetAttribute.WA_StyledBackground, True
+        )
         main.addWidget(self.status_label)
 
         self.log = QtWidgets.QPlainTextEdit()

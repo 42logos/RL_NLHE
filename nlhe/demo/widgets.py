@@ -166,6 +166,8 @@ class PlayerPanel(QtWidgets.QFrame):
         super().__init__()
         self.seat = seat
         self.setObjectName("player-panel")
+        # allow QSS background colors to fully apply
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFrameShape(QtWidgets.QFrame.Shape.Box)
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(4, 4, 4, 4)
@@ -179,6 +181,9 @@ class PlayerPanel(QtWidgets.QFrame):
         self.seat_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.seat_label.setFixedHeight(24)
         self.seat_label.setObjectName("badge")
+        self.seat_label.setAttribute(
+            QtCore.Qt.WidgetAttribute.WA_StyledBackground, True
+        )
         info_row.addWidget(self.seat_label)
 
         info_row.addStretch(1)
@@ -210,7 +215,21 @@ class PlayerPanel(QtWidgets.QFrame):
 
         self.last = QtWidgets.QLabel("")
         self.last.setObjectName("status-label")
+        self.last.setAttribute(
+            QtCore.Qt.WidgetAttribute.WA_StyledBackground, True
+        )
         lay.addWidget(self.last)
+
+        margins = lay.contentsMargins()
+        min_width = (
+            self.seat_label.sizeHint().width()
+            + self.stack_label.sizeHint().width()
+            + self.bet_box.width()
+            + info_row.spacing() * 2
+            + margins.left()
+            + margins.right()
+        )
+        self.setMinimumWidth(min_width)
 
         self._last_bet = 0
 
