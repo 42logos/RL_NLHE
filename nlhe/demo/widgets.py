@@ -111,11 +111,13 @@ class PlayerPanel(QtWidgets.QFrame):
             "border-radius:12px; background:#333333; color:white;",
         )
         info_row.addWidget(self.seat_label)
+        self.seat_text = QtWidgets.QLabel(f"Seat {seat}")
+        info_row.addWidget(self.seat_text)
         self.stack_label = QtWidgets.QLabel("Stack 0")
         info_row.addWidget(self.stack_label)
         info_row.addWidget(ChipLabel())
-        self.bet_label = QtWidgets.QLabel("Bet 0")
-        info_row.addWidget(self.bet_label)
+        self.round_label = QtWidgets.QLabel("Round 0")
+        info_row.addWidget(self.round_label)
         lay.addLayout(info_row)
 
         cards_row = QtWidgets.QHBoxLayout()
@@ -129,8 +131,8 @@ class PlayerPanel(QtWidgets.QFrame):
 
         self._opacity = QtWidgets.QGraphicsOpacityEffect(self)
         self.setGraphicsEffect(self._opacity)
-        self._bet_effect = QtWidgets.QGraphicsOpacityEffect(self.bet_label)
-        self.bet_label.setGraphicsEffect(self._bet_effect)
+        self._bet_effect = QtWidgets.QGraphicsOpacityEffect(self.round_label)
+        self.round_label.setGraphicsEffect(self._bet_effect)
         self._last_bet = 0
 
     def _animate_bet(self) -> None:
@@ -152,7 +154,7 @@ class PlayerPanel(QtWidgets.QFrame):
             lbl.set_card(holes[i] if i < len(holes) else None)
 
         self.stack_label.setText(f"Stack {p.stack}")
-        self.bet_label.setText(f"Bet {p.bet}")
+        self.round_label.setText(f"Round {p.bet}")
         if p.bet > self._last_bet:
             self._animate_bet()
         self._last_bet = p.bet
