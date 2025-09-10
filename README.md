@@ -164,9 +164,9 @@ $$
 a_{\text{raise}} = \text{min\_raise} + r \cdot (\text{max\_raise} - \text{min\_raise})
 $$
 
-## 5. Research Applications and Contributions
+## 5. Project Applications and Contributions
 
-### 5.1 Key Research Features
+### 5.1 Key Project Features
 
 1. **Deterministic Gameplay**: Fixed random seeds enable perfect reproducibility
 2. **Complete Information Logging**: Full action history for analysis and reconstruction
@@ -237,7 +237,7 @@ print(f"Mean reward: {mean_reward:.2f} ± {std_reward:.2f}")
 
 ## 7. Installation and Dependencies
 
-### 7.1 Research Software Stack
+### 7.1 Project Software Stack
 
 - **Python 3.11+**: Primary implementation language
 - **Rust toolchain**: For high-performance extensions
@@ -295,16 +295,8 @@ If you use this platform in your research, please cite:
 }
 ```
 
-## 10. Future Research Directions
-
-- Integration with larger game theory frameworks
-- Support for additional poker variants
-- Advanced opponent modeling capabilities
-- Real-time strategy adaptation
-- Multi-modal observation spaces (including betting patterns)
-
-## 11. License
+## 10. License
 
 MIT License - See LICENSE file for details.
 
-This research software is provided for academic use only. Commercial use may require additional licensing.
+This software is provided for academic use only. Commercial use may require additional licensing.
