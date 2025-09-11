@@ -5,7 +5,7 @@
 #player-panel {
     border: 2px solid #000000;
     border-radius: 8px;
-    background-color: #4c5f54;
+    background-color: #0bb250ff;
     color: #000000;
 }
 
@@ -24,7 +24,7 @@
 }
 
 #player-panel[state="called"] {
-    background-color: #4c5f54;
+    background-color: #056fa0ff;
     color: #ffffff;
 }
 
