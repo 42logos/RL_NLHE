@@ -1052,6 +1052,17 @@ impl NLHEngine {
         Ok((done, rewards, diff))
     }
 
+    /// Like step_diff but avoids constructing an Action on the Python side.
+    /// kind: 0=FOLD,1=CHECK,2=CALL,3=RAISE_TO ; amount: None unless kind==3
+    fn step_diff_raw(
+        &mut self,
+        kind: u8,
+        amount: Option<i32>,
+    ) -> PyResult<(bool, Option<Vec<i32>>, StepDiff)> {
+        let a = Action { kind, amount };
+        self.step_diff(&a)
+    }
+
     /// Advance round; returns (done, rewards?, diff)
     fn advance_round_if_needed_now(&mut self) -> PyResult<(bool, Option<Vec<i32>>, StepDiff)> {
         // Snapshot BEFORE
