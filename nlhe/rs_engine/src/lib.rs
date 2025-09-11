@@ -1,7 +1,7 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PyTuple};
-// no PyCell fast-path imports; attribute updates handle all cases
+use pyo3::Py;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -1153,18 +1153,16 @@ impl NLHEngine {
         py_state: &Bound<'py, pyo3::PyAny>,
         a: &Action,
     ) -> PyResult<(bool, Option<Vec<i32>>)> {
-        // --- SNAPSHOT BEFORE (immutable) ---
-        let (board_len_before, round_before, _prev_players) = {
+        // --- optional fast path ---
+        let fast_cell = py_state.extract::<Py<GameState>>().ok();
+        let (board_len_before, round_before) = if fast_cell.is_some() {
+            (0, String::new())
+        } else {
             let s = self
                 .cur
                 .as_ref()
                 .ok_or_else(|| PyValueError::new_err("no state"))?;
-            let snap: Vec<(i32, i32, i32, i64, String)> = s
-                .players
-                .iter()
-                .map(|p| (p.stack, p.bet, p.cont, p.rho, p.status.clone()))
-                .collect();
-            (s.board.len(), s.round_label.clone(), snap)
+            (s.board.len(), s.round_label.clone())
         };
 
         // --- MUTATE RUST STATE ---
@@ -1176,7 +1174,13 @@ impl NLHEngine {
             Self::step_on_internal(self.n, s_mut, a)?
         };
 
-        // --- APPLY CHANGES TO PYTHON MIRROR IN ONE CALL ---
+        if let Some(cell) = fast_cell {
+            let mut cell_ref = cell.borrow_mut(py);
+            *cell_ref = self.cur.as_ref().unwrap().clone();
+            return Ok((done, rewards));
+        }
+
+        // --- APPLY CHANGES TO PYTHON MIRROR ---
         let s2 = self.cur.as_ref().unwrap();
         let round_changed = s2.round_label != round_before;
 
@@ -1201,7 +1205,6 @@ impl NLHEngine {
             for &c in &s2.board[board_len_before..] {
                 board_py.append(c)?;
             }
-            // Reassign: #[pyo3(get, set)] returns a fresh list
             py_state.setattr("board", board_py)?;
         }
 
@@ -1211,12 +1214,7 @@ impl NLHEngine {
             let al_py = al_obj.downcast::<PyList>()?;
             let tup = PyTuple::new_bound(
                 py,
-                &[
-                    i.into_py(py),
-                    aid.into_py(py),
-                    amt.into_py(py),
-                    rid.into_py(py),
-                ],
+                &[i.into_py(py), aid.into_py(py), amt.into_py(py), rid.into_py(py)],
             );
             al_py.append(tup)?;
             py_state.setattr("actions_log", al_py)?;
@@ -1227,8 +1225,6 @@ impl NLHEngine {
         let players_py = players_obj.downcast::<PyList>()?;
 
         if round_changed {
-            // If the round changed, reset_round has modified ALL players (bet=0, rho=-1e9 for active).
-            // We must reflect that in the Python mirror for EVERY player.
             for (idx, p_new) in s2.players.iter().enumerate() {
                 let p_obj = players_py.get_item(idx)?;
                 p_obj.setattr("stack", p_new.stack)?;
@@ -1238,11 +1234,10 @@ impl NLHEngine {
                 p_obj.setattr("status", p_new.status.clone())?;
             }
         } else {
-            // old path: update only changed players using the bitmask
             let mut mask = changed_mask;
             while mask != 0 {
                 let idx = mask.trailing_zeros() as usize;
-                mask &= mask - 1; // clear lowest set bit
+                mask &= mask - 1;
                 let p_new = &s2.players[idx];
                 let p_obj = players_py.get_item(idx)?;
                 p_obj.setattr("stack", p_new.stack)?;
@@ -1263,8 +1258,11 @@ impl NLHEngine {
         py: Python<'py>,
         py_state: &Bound<'py, pyo3::PyAny>,
     ) -> PyResult<(bool, Option<Vec<i32>>)> {
-        // --- SNAPSHOT BEFORE ---
-        let (board_len_before, round_before) = {
+        // --- optional fast path ---
+        let fast_cell = py_state.extract::<Py<GameState>>().ok();
+        let (board_len_before, round_before) = if fast_cell.is_some() {
+            (0, String::new())
+        } else {
             let s = self
                 .cur
                 .as_ref()
@@ -1280,6 +1278,12 @@ impl NLHEngine {
                 .ok_or_else(|| PyValueError::new_err("no state"))?;
             advance_round_if_needed_internal(self.n, s_mut)?
         };
+
+        if let Some(cell) = fast_cell {
+            let mut cell_ref = cell.borrow_mut(py);
+            *cell_ref = self.cur.as_ref().unwrap().clone();
+            return Ok((done, rewards));
+        }
 
         // --- APPLY TO PYTHON ---
         let s2 = self.cur.as_ref().unwrap();
@@ -1312,12 +1316,7 @@ impl NLHEngine {
             let al_py = al_obj.downcast::<PyList>()?;
             let tup = PyTuple::new_bound(
                 py,
-                &[
-                    i.into_py(py),
-                    aid.into_py(py),
-                    amt.into_py(py),
-                    rid.into_py(py),
-                ],
+                &[i.into_py(py), aid.into_py(py), amt.into_py(py), rid.into_py(py)],
             );
             al_py.append(tup)?;
             py_state.setattr("actions_log", al_py)?;
