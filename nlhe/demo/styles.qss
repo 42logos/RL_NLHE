@@ -5,8 +5,8 @@
 #player-panel {
     border: 2px solid #000000;
     border-radius: 8px;
-    background-color: #4c5f54ff;
-    color: #000000ff;
+    background-color: #4c5f54;
+    color: #000000;
 }
 
 #player-panel[active="true"] {
@@ -24,12 +24,12 @@
 }
 
 #player-panel[state="called"] {
-    background-color: #4c5f54ff;
+    background-color: #4c5f54;
     color: #ffffff;
 }
 
 #player-panel[state="raised"] {
-    background-color: #ea9c28ff;
+    background-color: #ea9c28;
     color: #ffffff;
 }
 
@@ -38,7 +38,7 @@
     padding: 2px 4px;
     color: #ffffff;
     font-weight: bold;
-    background-color: #4c5f54ff;
+    background-color: #4c5f54;
 }
 
 #player-panel[state="folded"] QLabel#action-label {
@@ -50,17 +50,17 @@
 }
 
 #player-panel[state="called"] QLabel#action-label {
-    background-color: #4c5f54ff;
+    background-color: #4c5f54;
 }
 
 #player-panel[state="raised"] QLabel#action-label {
-    background-color: #ea9c28ff;
+    background-color: #ea9c28;
 }
 
 QLabel#badge {
     border-radius: 12px;
     padding: 0 6px;
-    background-color: #049c46ff;
+    background-color: #049c46;
     color: #ffffff;
     font-weight: bold;
 }
@@ -68,7 +68,7 @@ QLabel#badge {
 QLabel#status-label {
     border-radius: 4px;
     padding: 2px 4px;
-    background-color: #8f049cff;
+    background-color: #8f049c;
     color: #ffffff;
     font-weight: bold;
 }
