@@ -33,7 +33,7 @@
     color: #ffffff;
 }
 
-#player-panel QLabel#action-label {
+QLabel#action-label {
     border-radius: 4px;
     padding: 2px 4px;
     color: #ffffff;
@@ -41,19 +41,19 @@
     background-color: #4c5f54;
 }
 
-#player-panel[state="folded"] QLabel#action-label {
+QLabel#action-label[state="folded"] {
     background-color: #9e9e9e;
 }
 
-#player-panel[state="allin"] QLabel#action-label {
+QLabel#action-label[state="allin"] {
     background-color: #d32f2f;
 }
 
-#player-panel[state="called"] QLabel#action-label {
+QLabel#action-label[state="called"] {
     background-color: #4c5f54;
 }
 
-#player-panel[state="raised"] QLabel#action-label {
+QLabel#action-label[state="raised"] {
     background-color: #ea9c28;
 }
 
