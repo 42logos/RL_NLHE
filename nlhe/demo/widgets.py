@@ -99,9 +99,11 @@ class BetChip(QtWidgets.QWidget):
 
     _pix_cache: Dict[str, QtGui.QPixmap] = {}
     COLOR_LEVELS: List[Tuple[int, str]] = [
-        (1000, "black"),
-        (500, "green"),
-        (100, "blue"),
+        # thresholds ordered from highest to lowest
+        (500, "purple"),
+        (100, "black"),
+        (25, "green"),
+        (5, "blue"),
         (0, "red"),
     ]
 
