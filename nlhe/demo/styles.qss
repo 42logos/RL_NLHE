@@ -72,3 +72,35 @@ QLabel#status-label {
     color: #ffffff;
     font-weight: bold;
 }
+
+QPushButton#fold-button {
+    background-color: #9e9e9e;
+    color: #ffffff;
+    font-weight: bold;
+}
+QPushButton#fold-button:disabled {
+    background-color: #c4c4c4;
+    color: #ffffff;
+}
+
+QPushButton#check-button,
+QPushButton#call-button {
+    background-color: #4c5f54;
+    color: #ffffff;
+    font-weight: bold;
+}
+QPushButton#check-button:disabled,
+QPushButton#call-button:disabled {
+    background-color: #939f98;
+    color: #ffffff;
+}
+
+QPushButton#raise-button {
+    background-color: #ea9c28;
+    color: #ffffff;
+    font-weight: bold;
+}
+QPushButton#raise-button:disabled {
+    background-color: #f2c37e;
+    color: #ffffff;
+}

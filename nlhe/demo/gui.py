@@ -75,45 +75,20 @@ class NLHEGui(QtWidgets.QMainWindow):
 
         icons_dir = Path(__file__).with_name("assets") / "icons"
         btn_specs = {
-            # colours align with player panel states in styles.qss
-            "FOLD": (
-                "fold.svg",
-                "#9e9e9e",
-                "#c4c4c4",
-                "Forfeit the hand",
-            ),
-            "CHECK": (
-                "check.svg",
-                "#4c5f54",
-                "#939f98",
-                "Pass action without betting",
-            ),
-            "CALL": (
-                "call.svg",
-                "#4c5f54",
-                "#939f98",
-                "Match the current bet",
-            ),
-            "RAISE": (
-                "raise.svg",
-                "#ea9c28",
-                "#f2c37e",
-                "Increase the bet amount",
-            ),
+            "FOLD": ("fold.svg", "Forfeit the hand"),
+            "CHECK": ("check.svg", "Pass action without betting"),
+            "CALL": ("call.svg", "Match the current bet"),
+            "RAISE": ("raise.svg", "Increase the bet amount"),
         }
 
-        for name, (icon_file, color, disabled, tip) in btn_specs.items():
+        for name, (icon_file, tip) in btn_specs.items():
             btn = QtWidgets.QPushButton(name)
+            btn.setObjectName(f"{name.lower()}-button")
+            btn.setAttribute(
+                QtCore.Qt.WidgetAttribute.WA_StyledBackground, True
+            )
             btn.setIcon(QtGui.QIcon(str(icons_dir / icon_file)))
             btn.setIconSize(QtCore.QSize(16, 16))
-            btn.setStyleSheet(
-                "QPushButton {"
-                f"background-color: {color}; color: white; font-weight: bold;"
-                "}"
-                "QPushButton:disabled {"
-                f"background-color: {disabled}; color: white;"
-                "}"
-            )
             btn.setToolTip(tip)
             btn.clicked.connect(lambda _, n=name: self._on_action(n))
 
