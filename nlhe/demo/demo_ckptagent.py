@@ -1,4 +1,6 @@
+from nlhe.utils.map_action import map_action
 from ..envs.param_env import NLHEParamEnv
+from ..core.engine import NLHEngine
 from ..agents.ckpt_agent import CKPTAgent
 from ..agents.tamed_random import TamedRandomAgent
 from ..core.types import GameState
@@ -9,23 +11,23 @@ from typing import Dict, Any
 def run_demo_ckpt_agent(checkpoint_path: str, seed: int = 42, button: int = 0, hero_seat: int = 0) -> None:
     import random
     from typing import List
-    from ..core.engine import NLHEngine
-    from ..core.types import GameState
     from gymnasium import spaces
 
     rng = random.Random(seed)
-    env = NLHEngine(sb=1, bb=2, start_stack=100, rng=rng)
-    s = env.reset_hand(button=button)
+    
 
     # Create agents
-    agents: List = [TamedRandomAgent(rng) for _ in range(env.N)]
+    agents: List = [TamedRandomAgent(rng) for _ in range(6)]
     from ..agents.human_cli import HumanAgent
     agents[hero_seat] = HumanAgent()
     # env.N mod (hero_seat +1) is for ckpt agent to be next to act after hero
-    ckpt_seat = (hero_seat + 1) % env.N
-    agents[ckpt_seat] = CKPTAgent(checkpoint_path)
+    ckpt_seat = (hero_seat + 1) % 6
+    agents[ckpt_seat] = CKPTAgent(checkpoint_path, history_len=64)  # Use original training config
     print(f"Using CKPTAgent at seat {ckpt_seat}")
     print(f"Using HumanAgent at seat {hero_seat}")
+
+    env = NLHEngine(sb=1, bb=2, start_stack=100, rng=rng)
+    s = env.reset_hand()
 
     done = False
     rewards = None
@@ -41,6 +43,8 @@ def run_demo_ckpt_agent(checkpoint_path: str, seed: int = 42, button: int = 0, h
         seat = s.next_to_act
         agent = agents[seat]
         a = agent.act(env, s, seat)
+        print("Agent action:", a)
+        print(f"converted action: {a}")
         s, done, rewards, _ = env.step(s, a)
 
     print("\n=== Hand Result ===")

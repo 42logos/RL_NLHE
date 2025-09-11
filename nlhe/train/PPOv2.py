@@ -9,7 +9,6 @@ import hydra
 
 try:  # RLlib >= 2.6 new RLModule API
     from ray.rllib.core.rl_module.default_model_config import DefaultModelConfig  # type: ignore
-    from ray.rllib.connectors.env_to_module import FlattenObservations  # type: ignore
     _NEW_RLLIB_API = True
 except Exception:  # pragma: no cover - fall back to older RLlib versions
     DefaultModelConfig = None  # type: ignore
@@ -24,6 +23,27 @@ from .callbacks import DefaultCallback
 from .loggers import SlimTensorboardLogger
 from .Evaluators import EvaluatorSpec, Evaluator
 
+from .flattener import FlattenObsWrapper
+from ray.tune.registry import register_env
+def make_env(env_config):
+    """env_config is an EnvContext (dict-like). Read keys, not attributes."""
+    hero_seat   = env_config.get("hero_seat", 0)
+    bb          = env_config.get("bb", 2)
+    sb          = env_config.get("sb", bb / 2)
+    seed        = env_config.get("seed", 0)
+    start_stack = env_config.get("start_stack", 100)
+    history_len = env_config.get("history_len", 64)
+
+    base = NLHEGymParamEnv(
+        hero_seat=hero_seat,
+        bb=bb,
+        sb=sb,
+        seed=seed,
+        start_stack=start_stack,
+        history_len=history_len,
+    )
+    return FlattenObsWrapper(base, history_len=history_len)
+
 def build_algo(cfg):
     if cfg.train_settings.algo == "PPO":
         return build_ppo(cfg)
@@ -33,6 +53,8 @@ def build_algo(cfg):
 def build_ppo(cfg) -> PPO:
     print("Building PPO algorithm with the following configuration:")
     pprint(cfg)
+    
+    register_env("nlhe_flat", lambda cfg: make_env(cfg))
 
     if _NEW_RLLIB_API:
         config = (
@@ -47,12 +69,12 @@ def build_ppo(cfg) -> PPO:
                 minibatch_size=cfg.train_settings.num_mini_batches,
             )
             .environment(
-                env=NLHEGymParamEnv,
+                env="nlhe_flat",
                 env_config={
-                    "hero_seat": cfg.env_settings.hero_seat,
-                    "bb": cfg.env_settings.bb,
-                    "sb": (cfg.env_settings.bb / 2),
-                    "seed": cfg.env_settings.seed,
+                    "hero_seat":   cfg.env_settings.hero_seat,
+                    "bb":          cfg.env_settings.bb,
+                    "sb":          cfg.env_settings.bb / 2,
+                    "seed":        cfg.env_settings.seed,
                     "start_stack": cfg.env_settings.starting_stack,
                     "history_len": cfg.env_settings.history_length,
                 },
@@ -70,7 +92,7 @@ def build_ppo(cfg) -> PPO:
                 )
             )
             .env_runners(
-                env_to_module_connector=lambda env, spaces, device: [FlattenObservations()],
+
                 num_env_runners=cfg.train_settings.num_env_runners,
             )
             .learners(

@@ -6,6 +6,7 @@ from typing import List, Optional
 from PyQt6 import QtCore
 
 from ..agents.tamed_random import TamedRandomAgent
+from ..agents.ckpt_agent import CKPTAgent
 from ..core.engine import NLHEngine
 from ..core.types import Action, GameState
 
@@ -30,10 +31,11 @@ class GameController(QtCore.QObject):
         self.seed_val = seed
         self.rng = random.Random(seed)
         self.engine = NLHEngine(sb=1, bb=2, start_stack=100, rng=self.rng)
-        self.agents: List[TamedRandomAgent | None] = [
+        self.agents: List[TamedRandomAgent | CKPTAgent | None] = [
             TamedRandomAgent(self.rng) for _ in range(self.engine.N)
         ]
         self.agents[hero_seat] = None  # human
+        self.agents[((hero_seat + 1) % self.engine.N)] = CKPTAgent(r"E:\Programming_Projects\nlhe_refactor\checkpoints\20250911_113805\checkpoint_0000043")  # ckpt agent next to act after hero
 
         self.state: GameState = self.engine.reset_hand(button=0)
         self.state_changed.emit(self.state)
