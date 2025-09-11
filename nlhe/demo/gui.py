@@ -142,8 +142,10 @@ class NLHEGui(QtWidgets.QMainWindow):
         seed_row = QtWidgets.QHBoxLayout()
         main.addLayout(seed_row)
         seed_row.addWidget(QtWidgets.QLabel("Seed:"))
+        self._seed_modified = False
         self.seed_edit = QtWidgets.QLineEdit(str(self.controller.seed_val))
         self.seed_edit.setFixedWidth(80)
+        self.seed_edit.textEdited.connect(self._on_seed_edited)
         seed_row.addWidget(self.seed_edit)
         self.next_hand_btn = QtWidgets.QPushButton("Next Hand")
         self.next_hand_btn.setEnabled(False)
@@ -172,6 +174,9 @@ class NLHEGui(QtWidgets.QMainWindow):
         else:
             msg = f"Seat {seat} folds"
         self.log.appendPlainText(msg)
+
+    def _on_seed_edited(self, _text: str) -> None:
+        self._seed_modified = True
 
     def _on_state_changed(self, _state: GameState) -> None:
         self._update_view()
@@ -272,15 +277,20 @@ class NLHEGui(QtWidgets.QMainWindow):
         self.raise_slider.setEnabled(False)
         self.status_label.setText("Hand complete")
         self.seed_edit.setText(str(self.controller.seed_val))
+        self._seed_modified = False
         self.next_hand_btn.setEnabled(True)
 
     def _start_next_hand(self) -> None:
-        try:
-            seed = int(self.seed_edit.text())
-        except ValueError:
+        if self._seed_modified:
+            try:
+                seed = int(self.seed_edit.text())
+            except ValueError:
+                seed = None
+        else:
             seed = None
         self.controller.start_next_hand(seed)
         self.seed_edit.setText(str(self.controller.seed_val))
+        self._seed_modified = False
         self.log.clear()
         for btn in self.action_buttons.values():
             btn.setEnabled(True)
