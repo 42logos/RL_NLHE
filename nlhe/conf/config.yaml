@@ -9,6 +9,7 @@ train_settings:
   gamma: 0.8
   shuffle_batches: true
   num_env_runners: 12
+  use_gpu: false
 
 network_settings: 
   fc_hidden_sizes: [256, 256]

@@ -61,9 +61,16 @@ def build_ppo(cfg) -> PPO:
                 free_log_std=cfg.network_settings.free_log_std,
             )
         )
-        .env_runners(env_to_module_connector=lambda env, spaces, device: [FlattenObservations()], num_env_runners=cfg.train_settings.num_env_runners)
-        .learners(num_learners=0, num_gpus_per_learner=1)
+        .env_runners(
+            env_to_module_connector=lambda env, *args: [FlattenObservations()],
+            num_env_runners=cfg.train_settings.num_env_runners,
+        )
+        .learners(num_learners=0, num_gpus_per_learner=1 if getattr(cfg.train_settings, "use_gpu", True) else 0)
         .callbacks(callbacks_class=partial(DefaultCallback, cfg=cfg))
+        .api_stack(
+            enable_rl_module_and_learner=False,
+            enable_env_runner_and_connector_v2=False,
+        )
     )
 
     # Apply evaluation spec produced by separate module (closure/object)
