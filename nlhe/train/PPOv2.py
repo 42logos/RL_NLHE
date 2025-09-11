@@ -7,8 +7,15 @@ import time
 
 import hydra
 
-from ray.rllib.core.rl_module.default_model_config import DefaultModelConfig
-from ray.rllib.connectors.env_to_module import FlattenObservations
+try:  # RLlib >= 2.6 new RLModule API
+    from ray.rllib.core.rl_module.default_model_config import DefaultModelConfig  # type: ignore
+    from ray.rllib.connectors.env_to_module import FlattenObservations  # type: ignore
+    _NEW_RLLIB_API = True
+except Exception:  # pragma: no cover - fall back to older RLlib versions
+    DefaultModelConfig = None  # type: ignore
+    FlattenObservations = None  # type: ignore
+    _NEW_RLLIB_API = False
+
 from ray.rllib.algorithms.ppo import PPO, PPOConfig
 from ray.tune.logger import UnifiedLogger
 
@@ -27,44 +34,85 @@ def build_ppo(cfg) -> PPO:
     print("Building PPO algorithm with the following configuration:")
     pprint(cfg)
 
-    config = (
-        PPOConfig()
-        .training(
-            lr=cfg.train_settings.learning_rate,
-            gamma=cfg.train_settings.gamma,
-            grad_clip=cfg.train_settings.clip_grad_norm,
-            num_epochs=cfg.train_settings.num_epochs,
-            shuffle_batch_per_epoch=cfg.train_settings.shuffle_batches,
-            train_batch_size_per_learner=cfg.train_settings.batch_size,
-            minibatch_size=cfg.train_settings.num_mini_batches,
+    if _NEW_RLLIB_API:
+        config = (
+            PPOConfig()
+            .training(
+                lr=cfg.train_settings.learning_rate,
+                gamma=cfg.train_settings.gamma,
+                grad_clip=cfg.train_settings.clip_grad_norm,
+                num_epochs=cfg.train_settings.num_epochs,
+                shuffle_batch_per_epoch=cfg.train_settings.shuffle_batches,
+                train_batch_size_per_learner=cfg.train_settings.batch_size,
+                minibatch_size=cfg.train_settings.num_mini_batches,
+            )
+            .environment(
+                env=NLHEGymParamEnv,
+                env_config={
+                    "hero_seat": cfg.env_settings.hero_seat,
+                    "bb": cfg.env_settings.bb,
+                    "sb": (cfg.env_settings.bb / 2),
+                    "seed": cfg.env_settings.seed,
+                    "start_stack": cfg.env_settings.starting_stack,
+                    "history_len": cfg.env_settings.history_length,
+                },
+            )
+            .rl_module(
+                model_config=DefaultModelConfig(
+                    fcnet_hiddens=cfg.network_settings.fc_hidden_sizes,
+                    fcnet_activation=cfg.network_settings.fc_activation,
+                    head_fcnet_hiddens=cfg.network_settings.head_hidden_sizes,
+                    head_fcnet_activation=cfg.network_settings.head_activation,
+                    use_lstm=cfg.network_settings.use_lstm,
+                    lstm_cell_size=cfg.network_settings.lstm_hidden_size,
+                    max_seq_len=cfg.env_settings.history_length,
+                    free_log_std=cfg.network_settings.free_log_std,
+                )
+            )
+            .env_runners(
+                env_to_module_connector=lambda env, spaces, device: [FlattenObservations()],
+                num_env_runners=cfg.train_settings.num_env_runners,
+            )
+            .learners(
+                num_learners=0,
+                num_gpus_per_learner=1 if getattr(cfg.train_settings, "use_gpu", True) else 0,
+            )
+            .callbacks(callbacks_class=partial(DefaultCallback, cfg=cfg))
         )
-        .environment(
-            env=NLHEGymParamEnv,
-            env_config={
-                "hero_seat": cfg.env_settings.hero_seat,
-                "bb": cfg.env_settings.bb,
-                "sb": (cfg.env_settings.bb / 2),
-                "seed": cfg.env_settings.seed,
-                "start_stack": cfg.env_settings.starting_stack,
-                "history_len": cfg.env_settings.history_length,
-            },
-        )
-        .rl_module(
-            model_config=DefaultModelConfig(
+    else:  # Older RLlib API
+        config = (
+            PPOConfig()
+            .training(
+                lr=cfg.train_settings.learning_rate,
+                gamma=cfg.train_settings.gamma,
+                grad_clip=cfg.train_settings.clip_grad_norm,
+                train_batch_size=cfg.train_settings.batch_size,
+                sgd_minibatch_size=cfg.train_settings.num_mini_batches,
+                num_sgd_iter=cfg.train_settings.num_epochs,
+            )
+            .environment(
+                env=NLHEGymParamEnv,
+                env_config={
+                    "hero_seat": cfg.env_settings.hero_seat,
+                    "bb": cfg.env_settings.bb,
+                    "sb": (cfg.env_settings.bb / 2),
+                    "seed": cfg.env_settings.seed,
+                    "start_stack": cfg.env_settings.starting_stack,
+                    "history_len": cfg.env_settings.history_length,
+                },
+            )
+            .rollouts(num_rollout_workers=cfg.train_settings.num_env_runners)
+            .resources(num_gpus=1 if getattr(cfg.train_settings, "use_gpu", True) else 0)
+            .framework("torch")
+            .model(
                 fcnet_hiddens=cfg.network_settings.fc_hidden_sizes,
                 fcnet_activation=cfg.network_settings.fc_activation,
-                head_fcnet_hiddens=cfg.network_settings.head_hidden_sizes,
-                head_fcnet_activation=cfg.network_settings.head_activation,
                 use_lstm=cfg.network_settings.use_lstm,
                 lstm_cell_size=cfg.network_settings.lstm_hidden_size,
-                max_seq_len=cfg.env_settings.history_length,
                 free_log_std=cfg.network_settings.free_log_std,
             )
+            .callbacks(callbacks_class=partial(DefaultCallback, cfg=cfg))
         )
-        .env_runners(env_to_module_connector=lambda env, spaces, device: [FlattenObservations()], num_env_runners=cfg.train_settings.num_env_runners)
-        .learners(num_learners=0, num_gpus_per_learner=1)
-        .callbacks(callbacks_class=partial(DefaultCallback, cfg=cfg))
-    )
 
     # Apply evaluation spec produced by separate module (closure/object)
     config = EvaluatorSpec(cfg).apply_to(config)
