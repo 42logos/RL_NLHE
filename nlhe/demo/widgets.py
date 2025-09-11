@@ -312,6 +312,7 @@ class PlayerPanel(QtWidgets.QFrame):
         elif last is not None:
             aid, amt = last
             if aid == 1:
+                state = "checked"
                 last_txt = "check"
             elif aid == 2:
                 state = "called"

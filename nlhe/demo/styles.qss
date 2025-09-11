@@ -23,8 +23,9 @@
     color: #ffffff;
 }
 
-#player-panel[state="called"] {
-    background-color: #4c5f54;
+#player-panel[state="called"],
+#player-panel[state="checked"] {
+    background-color: #049c46;
     color: #ffffff;
 }
 
@@ -49,8 +50,9 @@ QLabel#action-label[state="allin"] {
     background-color: #d32f2f;
 }
 
-QLabel#action-label[state="called"] {
-    background-color: #4c5f54;
+QLabel#action-label[state="called"],
+QLabel#action-label[state="checked"] {
+    background-color: #049c46;
 }
 
 QLabel#action-label[state="raised"] {
@@ -85,13 +87,13 @@ QPushButton#fold-button:disabled {
 
 QPushButton#check-button,
 QPushButton#call-button {
-    background-color: #4c5f54;
+    background-color: #049c46;
     color: #ffffff;
     font-weight: bold;
 }
 QPushButton#check-button:disabled,
 QPushButton#call-button:disabled {
-    background-color: #939f98;
+    background-color: #71c594;
     color: #ffffff;
 }
 
