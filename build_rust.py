@@ -176,17 +176,17 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.crate_dir == "both":
+        repo_root = Path(__file__).resolve().parent
+        py, using_global = resolve_python(
+            repo_root / args.venv, allow_global=args.allow_global
+        )
         for dir in ("nlhe_eval", "rs_engine"):
             print(f"Building {dir}")
             args.crate_dir = dir
-            repo_root = Path(__file__).resolve().parent
             crate = repo_root / 'nlhe' / args.crate_dir
             if not crate.exists():
                 raise SystemExit(f"crate directory {crate!r} not found")
             module = args.module_name or get_crate_name(crate)
-            py, using_global = resolve_python(
-                repo_root / args.venv, allow_global=args.allow_global
-            )
 
             if args.use_maturin:
                 build_with_maturin(py, crate, module, global_install=using_global)
