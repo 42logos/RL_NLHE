@@ -81,14 +81,7 @@ class NLHEngine:
         la.min_raise_to = None if min_to is None else int(min_to)
         la.max_raise_to = None if max_to is None else int(max_to)
         la.has_raise_right = None if has_rr is None else bool(has_rr)
-        
-        #return as list
-        return PyLegalActionInfo(
-            actions=list(la.actions),
-            min_raise_to=la.min_raise_to,
-            max_raise_to=la.max_raise_to,
-            has_raise_right=la.has_raise_right
-        )
+        return la
 
     def step(self, s, a: PyAction) -> Tuple[Any, bool, Optional[List[int]], Dict[str, Any]]:
         # map Action → two scalars (no PyO3 Action at all)

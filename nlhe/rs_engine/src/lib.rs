@@ -1,6 +1,5 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyList, PyTuple};
 use pyo3::Py;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::cmp::Ordering;
@@ -811,6 +810,49 @@ fn legal_actions_from(s: &GameState) -> PyResult<LegalActionInfo> {
     }
     Ok(LegalActionInfo::new(acts, None, None, None))
 }
+
+fn legal_actions_bits_from_state(s: &GameState) -> (u8, Option<i32>, Option<i32>, Option<bool>) {
+    let i = match s.next_to_act {
+        Some(x) => x,
+        None => return (0, None, None, None),
+    };
+    let p = &s.players[i];
+    if p.status != "active" {
+        return (0, None, None, None);
+    }
+
+    let owe = (s.current_bet - p.bet).max(0);
+    let mut mask: u8 = 0;
+    if owe > 0 {
+        mask |= 1;
+    } // FOLD
+    if owe == 0 {
+        mask |= 2;
+    } // CHECK
+    if owe > 0 {
+        mask |= 4;
+    } // CALL
+
+    let can_raise = (p.status == "active") && (p.stack > 0);
+    if !can_raise {
+        return (mask, None, None, None);
+    }
+
+    let min_to = if s.current_bet == 0 {
+        s.min_raise.max(1)
+    } else {
+        s.current_bet + s.min_raise
+    };
+    let max_to = p.bet + p.stack;
+    let has_rr = (p.rho < s.tau) || (s.current_bet == 0);
+
+    if max_to > s.current_bet {
+        mask |= 8; // RAISE_TO
+        (mask, Some(min_to), Some(max_to), Some(has_rr))
+    } else {
+        (mask, None, None, None)
+    }
+}
 fn advance_round_if_needed_internal(
     n: usize,
     s: &mut GameState,
@@ -872,7 +914,8 @@ struct NLHEngine {
     bb: i32,
     start_stack: i32,
     rng: StdRng,
-    cur: Option<GameState>,
+    cur: Option<Py<GameState>>,
+    la_cache: (u8, Option<i32>, Option<i32>, Option<bool>),
 }
 
 #[pymethods]
@@ -900,6 +943,7 @@ impl NLHEngine {
             start_stack,
             rng,
             cur: None,
+            la_cache: (0, None, None, None),
         })
     }
 
@@ -909,10 +953,13 @@ impl NLHEngine {
     }
 
     /// Reset internal state and return a one-time full snapshot (Python builds its mirror from this)
-    fn reset_hand(&mut self, button: usize) -> PyResult<GameState> {
+    fn reset_hand(&mut self, py: Python<'_>, button: usize) -> PyResult<Py<GameState>> {
         let s = self.reset_hand_internal(button)?;
-        self.cur = Some(s.clone());
-        Ok(s)
+        let la = legal_actions_bits_from_state(&s);
+        let py_s = Py::new(py, s)?;
+        self.cur = Some(py_s.clone());
+        self.la_cache = la;
+        Ok(py_s)
     }
 
     /// Reset internal state and update the provided Python GameState mirror in-place.
@@ -923,93 +970,62 @@ impl NLHEngine {
         py_state: &Bound<'py, pyo3::PyAny>,
         button: usize,
     ) -> PyResult<()> {
-        // build new internal rust state
         let s_new = self.reset_hand_internal(button)?;
-        self.cur = Some(s_new.clone());
-        let s2 = self.cur.as_ref().unwrap();
-
-        // set scalars
-        py_state.setattr("button", s2.button)?;
-        py_state.setattr("round_label", s2.round_label.clone())?;
-        py_state.setattr("current_bet", s2.current_bet)?;
-        py_state.setattr("min_raise", s2.min_raise)?;
-        py_state.setattr("tau", s2.tau)?;
-        py_state.setattr("next_to_act", s2.next_to_act)?;
-        py_state.setattr("step_idx", s2.step_idx)?;
-        py_state.setattr("pot", s2.pot)?;
-        py_state.setattr("sb", s2.sb)?;
-        py_state.setattr("bb", s2.bb)?;
-
-        // board: clear
-        let board_obj = py_state.getattr("board")?;
-        let board_py = board_obj.downcast::<PyList>()?;
-        let empty_list = pyo3::types::PyList::empty_bound(py);
-        board_py.set_slice(0, board_py.len(), &empty_list)?;
-        py_state.setattr("board", board_py)?;
-
-        // actions_log: clear
-        let al_obj = py_state.getattr("actions_log")?;
-        let al_py = al_obj.downcast::<PyList>()?;
-        let empty_list2 = pyo3::types::PyList::empty_bound(py);
-        al_py.set_slice(0, al_py.len(), &empty_list2)?;
-        py_state.setattr("actions_log", al_py)?;
-
-        // players: update in-place; assume list length is fixed at N
-        let players_obj = py_state.getattr("players")?;
-        let players_py = players_obj.downcast::<PyList>()?;
-        for (idx, p_new) in s2.players.iter().enumerate() {
-            let p_obj = players_py.get_item(idx)?;
-            p_obj.setattr("hole", p_new.hole)?;
-            p_obj.setattr("stack", p_new.stack)?;
-            p_obj.setattr("bet", p_new.bet)?;
-            p_obj.setattr("cont", p_new.cont)?;
-            p_obj.setattr("status", p_new.status.clone())?;
-            p_obj.setattr("rho", p_new.rho)?;
+        let la = legal_actions_bits_from_state(&s_new);
+        let py_state: Py<GameState> = py_state.extract()?;
+        {
+            let mut gs = py_state.borrow_mut(py);
+            *gs = s_new;
         }
-        py_state.setattr("players", players_py)?;
-
+        self.cur = Some(py_state);
+        self.la_cache = la;
         Ok(())
     }
 
     /// Optional: export full snapshot (debug)
-    fn export_snapshot(&self) -> PyResult<GameState> {
+    fn export_snapshot(&self, py: Python<'_>) -> PyResult<GameState> {
         match &self.cur {
-            Some(s) => Ok(s.clone()),
+            Some(s) => Ok(s.borrow(py).clone()),
             None => Err(PyValueError::new_err("no state")),
         }
     }
 
     /// Legal actions from current internal state
-    fn legal_actions_now(&self) -> PyResult<LegalActionInfo> {
-        let s = self
+    fn legal_actions_now(&self, py: Python<'_>) -> PyResult<LegalActionInfo> {
+        let cell = self
             .cur
             .as_ref()
             .ok_or_else(|| PyValueError::new_err("no state"))?;
-        legal_actions_from(s)
+        let s = cell.borrow(py);
+        legal_actions_from(&s)
     }
 
     /// Step using internal state; returns (done, rewards?, diff)
-    fn step_diff(&mut self, a: &Action) -> PyResult<(bool, Option<Vec<i32>>, StepDiff)> {
-        // Snapshot values BEFORE mutating (immutable short-lived borrow)
+    fn step_diff(
+        &mut self,
+        py: Python<'_>,
+        a: &Action,
+    ) -> PyResult<(bool, Option<Vec<i32>>, StepDiff)> {
+        // Snapshot BEFORE
+        let cell = self
+            .cur
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("no state"))?;
         let (board_len_before, round_before) = {
-            let s = self
-                .cur
-                .as_ref()
-                .ok_or_else(|| PyValueError::new_err("no state"))?;
+            let s = cell.borrow(py);
             (s.board.len(), s.round_label.clone())
         };
 
-        // Now mutate
+        // Mutate
         let (done, rewards, last_log, changed_mask) = {
-            let s_mut = self
-                .cur
-                .as_mut()
-                .ok_or_else(|| PyValueError::new_err("no state"))?;
-            NLHEngine::step_on_internal(self.n, s_mut, a)?
+            let mut s_mut = cell.borrow_mut(py);
+            let res = NLHEngine::step_on_internal(self.n, &mut s_mut, a)?;
+            self.la_cache = legal_actions_bits_from_state(&s_mut);
+            res
         };
 
-        // Build diff from AFTER state
-        let s2 = self.cur.as_ref().unwrap();
+        // AFTER
+        let s2 = cell.borrow(py);
         let mut board_drawn: Vec<u8> = vec![];
         if s2.board.len() > board_len_before {
             board_drawn.extend_from_slice(&s2.board[board_len_before..]);
@@ -1056,35 +1072,39 @@ impl NLHEngine {
     /// kind: 0=FOLD,1=CHECK,2=CALL,3=RAISE_TO ; amount: None unless kind==3
     fn step_diff_raw(
         &mut self,
+        py: Python<'_>,
         kind: u8,
         amount: Option<i32>,
     ) -> PyResult<(bool, Option<Vec<i32>>, StepDiff)> {
         let a = Action { kind, amount };
-        self.step_diff(&a)
+        self.step_diff(py, &a)
     }
 
     /// Advance round; returns (done, rewards?, diff)
-    fn advance_round_if_needed_now(&mut self) -> PyResult<(bool, Option<Vec<i32>>, StepDiff)> {
+    fn advance_round_if_needed_now(
+        &mut self,
+        py: Python<'_>,
+    ) -> PyResult<(bool, Option<Vec<i32>>, StepDiff)> {
         // Snapshot BEFORE
+        let cell = self
+            .cur
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("no state"))?;
         let (board_len_before, round_before) = {
-            let s = self
-                .cur
-                .as_ref()
-                .ok_or_else(|| PyValueError::new_err("no state"))?;
+            let s = cell.borrow(py);
             (s.board.len(), s.round_label.clone())
         };
 
         // Mutate
         let (done, rewards, round_reset_mask) = {
-            let s_mut = self
-                .cur
-                .as_mut()
-                .ok_or_else(|| PyValueError::new_err("no state"))?;
-            advance_round_if_needed_internal(self.n, s_mut)?
+            let mut s_mut = cell.borrow_mut(py);
+            let res = advance_round_if_needed_internal(self.n, &mut s_mut)?;
+            self.la_cache = legal_actions_bits_from_state(&s_mut);
+            res
         };
 
         // AFTER
-        let s2 = self.cur.as_ref().unwrap();
+        let s2 = cell.borrow(py);
         let mut board_drawn: Vec<u8> = vec![];
         if s2.board.len() > board_len_before {
             board_drawn.extend_from_slice(&s2.board[board_len_before..]);
@@ -1137,118 +1157,19 @@ impl NLHEngine {
     fn step_apply_py_raw<'py>(
         &mut self,
         py: Python<'py>,
-        py_state: &Bound<'py, pyo3::PyAny>,
+        _py_state: &Bound<'py, pyo3::PyAny>,
         kind: u8,
         amount: Option<i32>,
     ) -> PyResult<(bool, Option<Vec<i32>>)> {
         let a = Action { kind, amount };
-        self.step_apply_py(py, py_state, &a)
-    }
-
-    /// Fast path: perform step on internal state AND update the given Python GameState mirror in-place.
-    /// Returns (done, rewards?)
-    fn step_apply_py<'py>(
-        &mut self,
-        py: Python<'py>,
-        py_state: &Bound<'py, pyo3::PyAny>,
-        a: &Action,
-    ) -> PyResult<(bool, Option<Vec<i32>>)> {
-        // --- optional fast path ---
-        let fast_cell = py_state.extract::<Py<GameState>>().ok();
-        let (board_len_before, round_before) = if fast_cell.is_some() {
-            (0, String::new())
-        } else {
-            let s = self
-                .cur
-                .as_ref()
-                .ok_or_else(|| PyValueError::new_err("no state"))?;
-            (s.board.len(), s.round_label.clone())
-        };
-
-        // --- MUTATE RUST STATE ---
-        let (done, rewards, _last_log, changed_mask) = {
-            let s_mut = self
-                .cur
-                .as_mut()
-                .ok_or_else(|| PyValueError::new_err("no state"))?;
-            Self::step_on_internal(self.n, s_mut, a)?
-        };
-
-        if let Some(cell) = fast_cell {
-            let mut cell_ref = cell.borrow_mut(py);
-            *cell_ref = self.cur.as_ref().unwrap().clone();
-            return Ok((done, rewards));
-        }
-
-        // --- APPLY CHANGES TO PYTHON MIRROR ---
-        let s2 = self.cur.as_ref().unwrap();
-        let round_changed = s2.round_label != round_before;
-
-        // scalars
-        py_state.setattr("step_idx", s2.step_idx)?;
-        py_state.setattr("current_bet", s2.current_bet)?;
-        py_state.setattr("min_raise", s2.min_raise)?;
-        py_state.setattr("tau", s2.tau)?;
-        py_state.setattr("pot", s2.pot)?;
-        match s2.next_to_act {
-            Some(v) => py_state.setattr("next_to_act", v)?,
-            None => py_state.setattr("next_to_act", py.None())?,
-        }
-        if round_changed {
-            py_state.setattr("round_label", s2.round_label.clone())?;
-        }
-
-        // board: append any newly dealt cards
-        if s2.board.len() > board_len_before {
-            let board_obj = py_state.getattr("board")?;
-            let board_py = board_obj.downcast::<PyList>()?;
-            for &c in &s2.board[board_len_before..] {
-                board_py.append(c)?;
-            }
-            py_state.setattr("board", board_py)?;
-        }
-
-        // actions_log: push last entry (always one new)
-        if let Some((i, aid, amt, rid)) = s2.actions_log.last().cloned() {
-            let al_obj = py_state.getattr("actions_log")?;
-            let al_py = al_obj.downcast::<PyList>()?;
-            let tup = PyTuple::new_bound(
-                py,
-                &[i.into_py(py), aid.into_py(py), amt.into_py(py), rid.into_py(py)],
-            );
-            al_py.append(tup)?;
-            py_state.setattr("actions_log", al_py)?;
-        }
-
-        // players: update only changed ones using the bitmask
-        let players_obj = py_state.getattr("players")?;
-        let players_py = players_obj.downcast::<PyList>()?;
-
-        if round_changed {
-            for (idx, p_new) in s2.players.iter().enumerate() {
-                let p_obj = players_py.get_item(idx)?;
-                p_obj.setattr("stack", p_new.stack)?;
-                p_obj.setattr("bet", p_new.bet)?;
-                p_obj.setattr("cont", p_new.cont)?;
-                p_obj.setattr("rho", p_new.rho)?;
-                p_obj.setattr("status", p_new.status.clone())?;
-            }
-        } else {
-            let mut mask = changed_mask;
-            while mask != 0 {
-                let idx = mask.trailing_zeros() as usize;
-                mask &= mask - 1;
-                let p_new = &s2.players[idx];
-                let p_obj = players_py.get_item(idx)?;
-                p_obj.setattr("stack", p_new.stack)?;
-                p_obj.setattr("bet", p_new.bet)?;
-                p_obj.setattr("cont", p_new.cont)?;
-                p_obj.setattr("rho", p_new.rho)?;
-                p_obj.setattr("status", p_new.status.clone())?;
-            }
-        }
-        py_state.setattr("players", players_py)?;
-
+        let cell = self
+            .cur
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("no state"))?;
+        let mut s_mut = cell.borrow_mut(py);
+        let (done, rewards, _last_log, _changed_mask) =
+            Self::step_on_internal(self.n, &mut s_mut, &a)?;
+        self.la_cache = legal_actions_bits_from_state(&s_mut);
         Ok((done, rewards))
     }
 
@@ -1256,135 +1177,22 @@ impl NLHEngine {
     fn advance_round_if_needed_apply_py<'py>(
         &mut self,
         py: Python<'py>,
-        py_state: &Bound<'py, pyo3::PyAny>,
+        _py_state: &Bound<'py, pyo3::PyAny>,
     ) -> PyResult<(bool, Option<Vec<i32>>)> {
-        // --- optional fast path ---
-        let fast_cell = py_state.extract::<Py<GameState>>().ok();
-        let (board_len_before, round_before) = if fast_cell.is_some() {
-            (0, String::new())
-        } else {
-            let s = self
-                .cur
-                .as_ref()
-                .ok_or_else(|| PyValueError::new_err("no state"))?;
-            (s.board.len(), s.round_label.clone())
-        };
-
-        // --- MUTATE RUST STATE ---
-        let (done, rewards, _round_reset_mask) = {
-            let s_mut = self
-                .cur
-                .as_mut()
-                .ok_or_else(|| PyValueError::new_err("no state"))?;
-            advance_round_if_needed_internal(self.n, s_mut)?
-        };
-
-        if let Some(cell) = fast_cell {
-            let mut cell_ref = cell.borrow_mut(py);
-            *cell_ref = self.cur.as_ref().unwrap().clone();
-            return Ok((done, rewards));
-        }
-
-        // --- APPLY TO PYTHON ---
-        let s2 = self.cur.as_ref().unwrap();
-
-        py_state.setattr("step_idx", s2.step_idx)?;
-        py_state.setattr("current_bet", s2.current_bet)?;
-        py_state.setattr("min_raise", s2.min_raise)?;
-        py_state.setattr("tau", s2.tau)?;
-        py_state.setattr("pot", s2.pot)?;
-        match s2.next_to_act {
-            Some(v) => py_state.setattr("next_to_act", v)?,
-            None => py_state.setattr("next_to_act", py.None())?,
-        }
-        if s2.round_label != round_before {
-            py_state.setattr("round_label", s2.round_label.clone())?;
-        }
-
-        if s2.board.len() > board_len_before {
-            let board_obj = py_state.getattr("board")?;
-            let board_py = board_obj.downcast::<PyList>()?;
-            for &c in &s2.board[board_len_before..] {
-                board_py.append(c)?;
-            }
-            py_state.setattr("board", board_py)?;
-        }
-
-        // push last log if any
-        if let Some((i, aid, amt, rid)) = s2.actions_log.last().cloned() {
-            let al_obj = py_state.getattr("actions_log")?;
-            let al_py = al_obj.downcast::<PyList>()?;
-            let tup = PyTuple::new_bound(
-                py,
-                &[i.into_py(py), aid.into_py(py), amt.into_py(py), rid.into_py(py)],
-            );
-            al_py.append(tup)?;
-            py_state.setattr("actions_log", al_py)?;
-        }
-
-        // players: update all (advance_round affects multiple players)
-        let players_obj = py_state.getattr("players")?;
-        let players_py = players_obj.downcast::<PyList>()?;
-        for (idx, p_new) in s2.players.iter().enumerate() {
-            let p_obj = players_py.get_item(idx)?;
-            p_obj.setattr("stack", p_new.stack)?;
-            p_obj.setattr("bet", p_new.bet)?;
-            p_obj.setattr("cont", p_new.cont)?;
-            p_obj.setattr("rho", p_new.rho)?;
-            p_obj.setattr("status", p_new.status.clone())?;
-        }
-        py_state.setattr("players", players_py)?;
-
+        let cell = self
+            .cur
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("no state"))?;
+        let mut s_mut = cell.borrow_mut(py);
+        let (done, rewards, _mask) = advance_round_if_needed_internal(self.n, &mut s_mut)?;
+        self.la_cache = legal_actions_bits_from_state(&s_mut);
         Ok((done, rewards))
     }
 
     /// Fast legal-actions: return (mask, min_to, max_to, has_rr)
     /// mask bits: 1=FOLD, 2=CHECK, 4=CALL, 8=RAISE_TO
     fn legal_actions_bits_now(&self) -> PyResult<(u8, Option<i32>, Option<i32>, Option<bool>)> {
-        let s = self
-            .cur
-            .as_ref()
-            .ok_or_else(|| PyValueError::new_err("no state"))?;
-        let i = match s.next_to_act {
-            Some(x) => x,
-            None => return Ok((0, None, None, None)),
-        };
-        let p = &s.players[i];
-        if p.status != "active" {
-            return Ok((0, None, None, None));
-        }
-
-        let owe = (s.current_bet - p.bet).max(0);
-        let mut mask: u8 = 0;
-        if owe > 0 {
-            mask |= 1;
-        } // FOLD
-        if owe == 0 {
-            mask |= 2;
-        } // CHECK
-        if owe > 0 {
-            mask |= 4;
-        } // CALL
-
-        let can_raise = (p.status == "active") && (p.stack > 0);
-        if !can_raise {
-            return Ok((mask, None, None, None));
-        }
-
-        let min_to = if s.current_bet == 0 {
-            s.min_raise.max(1)
-        } else {
-            s.current_bet + s.min_raise
-        };
-        let max_to = p.bet + p.stack;
-        let has_rr = (p.rho < s.tau) || (s.current_bet == 0);
-
-        if max_to > s.current_bet {
-            mask |= 8; // RAISE_TO
-            Ok((mask, Some(min_to), Some(max_to), Some(has_rr)))
-        } else {
-            Ok((mask, None, None, None))
-        }
+        Ok(self.la_cache)
     }
 }
 
