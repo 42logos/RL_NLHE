@@ -4,6 +4,7 @@ import numpy as np
 
 from ..core.types import Action, ActionType, GameState
 from .base import Agent, EngineLike
+from ..utils.restore_algo import restore_algorithm
 
 SENTINEL = -1
 
@@ -13,7 +14,7 @@ class CKPTAgent(Agent):
         from ray.rllib.algorithms.algorithm import Algorithm
         self.history_len = history_len
         # load algorithm from checkpoint
-        self.algo = Algorithm.from_checkpoint(checkpoint_path)
+        self.algo = restore_algorithm(checkpoint_path)
         # put model into eval mode if possible
         try:
             policy = self.algo.get_policy()
@@ -83,14 +84,78 @@ class CKPTAgent(Agent):
                 return Action(ActionType.RAISE_TO, amount=getattr(info, "min_raise_to", s.current_bet + s.min_raise))
         return Action(ActionType.CHECK)
 
+    def _flatten_obs_like_connector(self, o: dict) -> np.ndarray:
+        """Flatten observations to match FlattenObservations connector behavior."""
+        parts = []
+        parts.append(np.asarray(o["board"], dtype=np.float32).reshape(-1))          # 5
+        # board_len as single value, not one-hot (the connector might not one-hot encode it)
+        parts.append(np.array([o["board_len"]], dtype=np.float32))                  # 1
+        for k in ["current_bet", "hero_bet", "hero_cont", "hero_stack", "pot"]:     # 5 × 1
+            parts.append(np.array([o[k]], dtype=np.float32))
+        parts.append(np.asarray(o["hero_hole"], dtype=np.float32).reshape(-1))      # 2
+        parts.append(np.asarray(o["history"], dtype=np.float32).reshape(-1))        # 64*4 = 256
+        return np.concatenate(parts, axis=0)                                        # shape = [D]
+
     def act(self, env: EngineLike, s: GameState, seat: int) -> Action:
         obs = self._obs_from_state(s, seat)
+        
+        # Use new RLModule API
         try:
-            policy = self.algo.get_policy()
-            out = policy.compute_single_action(obs, explore=False)
-        except AttributeError:
-            out = self.algo.compute_single_action(obs, explore=False)
-        action = out[0] if isinstance(out, (tuple, list)) else out
+            # Try new API stack first
+            import torch
+            module = self.algo.get_module()
+            device = "cpu"  # Default to CPU
+            if hasattr(module, "parameters"):
+                try:
+                    device = str(next(module.parameters()).device)  # type: ignore
+                except StopIteration:
+                    pass
+            
+            # Convert observation to tensor batch
+            if isinstance(obs, dict):
+                # Flatten the dictionary observation to match training connector behavior
+                obs_flat = self._flatten_obs_like_connector(obs)
+                obs_batch = torch.from_numpy(obs_flat).unsqueeze(0).to(device)  # Add batch dimension
+            else:
+                obs_batch = torch.from_numpy(np.array(obs, dtype=np.float32)).unsqueeze(0).to(device)
+            
+            # Forward inference
+            with torch.no_grad():
+                out = module.forward_inference({"obs": obs_batch})  # type: ignore
+                
+            # Extract action from output
+            if "actions" in out:
+                action = out["actions"][0]  # Remove batch dimension
+            elif "action_dist_inputs" in out:
+                # Sample from distribution
+                dist_cls = module.get_inference_action_dist_cls()  # type: ignore
+                logits = out["action_dist_inputs"]
+                try:
+                    if hasattr(dist_cls, "from_logits"):
+                        dist = dist_cls.from_logits(logits)
+                    else:
+                        dist = dist_cls(logits)  # type: ignore
+                    action = dist.sample()[0]  # Remove batch dimension
+                except Exception:
+                    # Fallback: just use the logits directly as action
+                    action = logits[0]
+            else:
+                raise RuntimeError("No action or action_dist_inputs in module output")
+                
+            # Convert tensor to numpy if needed
+            if hasattr(action, "cpu") and hasattr(action, "numpy"):
+                action = action.cpu().numpy()  # type: ignore
+                
+        except (AttributeError, ImportError):
+            # Fallback to old API
+            try:
+                policy = self.algo.get_policy()
+                out = policy.compute_single_action(obs, explore=False)
+            except AttributeError:
+                out = self.algo.compute_single_action(obs, explore=False)
+            action = out[0] if isinstance(out, (tuple, list)) else out
+        
+        # Process action format
         if isinstance(action, (np.ndarray, list)):
             a_dict = {"atype": int(action[0]), "r": float(action[1])}
         elif isinstance(action, dict):

@@ -6,7 +6,7 @@ from .types import GameState as PyGameState, LegalActionInfo as PyLegalActionInf
 
 try:
     import nlhe_engine as _rs
-    if not hasattr(_rs, "NLHEngine") or not hasattr(_rs, "legal_actions_bits_now"):
+    if not hasattr(_rs, "NLHEngine") :
         raise ImportError("Rust backend not found: incomplete stub")
 except Exception as e:
     raise ImportError(f"Rust backend not found: {e}")
