@@ -77,7 +77,9 @@ class NLHEngine:
     def legal_actions(self, s) -> PyLegalActionInfo:
         mask, min_to, max_to, has_rr = self._rs.legal_actions_bits_now()
         la = self._la_reusable
-        la.actions = self._mask_cache[int(mask)]  # tuple of cached singletons
+        acts = self._mask_cache[int(mask)]  # tuple of cached singletons
+        la.actions.clear()
+        la.actions.extend(acts)
         la.min_raise_to = None if min_to is None else int(min_to)
         la.max_raise_to = None if max_to is None else int(max_to)
         la.has_raise_right = None if has_rr is None else bool(has_rr)
