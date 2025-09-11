@@ -259,14 +259,7 @@ struct PlayerDiff {
 impl PlayerDiff {
     #[new]
     #[pyo3(signature = (idx, stack, bet, cont, rho, status=None))]
-    fn new(
-        idx: usize,
-        stack: i32,
-        bet: i32,
-        cont: i32,
-        rho: i64,
-        status: Option<String>,
-    ) -> Self {
+    fn new(idx: usize, stack: i32, bet: i32, cont: i32, rho: i64, status: Option<String>) -> Self {
         Self {
             idx,
             stack,
@@ -296,7 +289,7 @@ struct StepDiff {
     #[pyo3(get)]
     round_label: Option<String>, // None = unchanged
     #[pyo3(get)]
-    board_drawn: Vec<u8>,        // newly dealt cards this transition
+    board_drawn: Vec<u8>, // newly dealt cards this transition
     #[pyo3(get)]
     actions_log_push: Option<(usize, i32, i32, i32)>,
     #[pyo3(get)]
@@ -462,7 +455,12 @@ fn hand_rank_5(cards5: &[u8; 5]) -> HandRank {
     }
     if bycnt[0].1 == 3 {
         let trips = bycnt[0].0;
-        let kickers: Vec<i32> = ranks.iter().cloned().filter(|r| *r != trips).take(2).collect();
+        let kickers: Vec<i32> = ranks
+            .iter()
+            .cloned()
+            .filter(|r| *r != trips)
+            .take(2)
+            .collect();
         return HandRank {
             cat: HandCategory::Trips as i32,
             tiebreak: [vec![trips], kickers].concat(),
@@ -484,7 +482,12 @@ fn hand_rank_5(cards5: &[u8; 5]) -> HandRank {
     }
     if bycnt[0].1 == 2 {
         let pair = bycnt[0].0;
-        let kickers: Vec<i32> = ranks.iter().cloned().filter(|r| *r != pair).take(3).collect();
+        let kickers: Vec<i32> = ranks
+            .iter()
+            .cloned()
+            .filter(|r| *r != pair)
+            .take(3)
+            .collect();
         return HandRank {
             cat: HandCategory::OnePair as i32,
             tiebreak: [vec![pair], kickers].concat(),
@@ -649,7 +652,12 @@ fn settle_showdown(n: usize, s: &GameState) -> PyResult<Vec<i32>> {
         .filter(|(_, p)| p.status != "folded")
         .map(|(i, _)| i)
         .collect();
-    let mut levels: Vec<i32> = s.players.iter().map(|p| p.cont).filter(|v| *v > 0).collect();
+    let mut levels: Vec<i32> = s
+        .players
+        .iter()
+        .map(|p| p.cont)
+        .filter(|v| *v > 0)
+        .collect();
     levels.sort();
     levels.dedup();
     if levels.is_empty() {
@@ -679,7 +687,11 @@ fn settle_showdown(n: usize, s: &GameState) -> PyResult<Vec<i32>> {
     for y in levels {
         let contributors_count = s.players.iter().filter(|p| p.cont >= y).count() as i32;
         let pk = contributors_count * (y - y_prev) + carry;
-        let elig: Vec<usize> = a.iter().cloned().filter(|i| s.players[*i].cont >= y).collect();
+        let elig: Vec<usize> = a
+            .iter()
+            .cloned()
+            .filter(|i| s.players[*i].cont >= y)
+            .collect();
 
         if !elig.is_empty() {
             let best_val = elig
@@ -754,13 +766,22 @@ fn legal_actions_from(s: &GameState) -> PyResult<LegalActionInfo> {
     let owe = (s.current_bet - p.bet).max(0);
     let mut acts = Vec::<Action>::new();
     if owe > 0 {
-        acts.push(Action { kind: 0, amount: None }); // FOLD
+        acts.push(Action {
+            kind: 0,
+            amount: None,
+        }); // FOLD
     }
     if owe == 0 {
-        acts.push(Action { kind: 1, amount: None }); // CHECK
+        acts.push(Action {
+            kind: 1,
+            amount: None,
+        }); // CHECK
     }
     if owe > 0 {
-        acts.push(Action { kind: 2, amount: None }); // CALL
+        acts.push(Action {
+            kind: 2,
+            amount: None,
+        }); // CALL
     }
 
     let can_raise = (p.status == "active") && (p.stack > 0);
@@ -776,7 +797,10 @@ fn legal_actions_from(s: &GameState) -> PyResult<LegalActionInfo> {
     let max_to = p.bet + p.stack;
     let has_rr = (p.rho < s.tau) || (s.current_bet == 0);
     if max_to > s.current_bet {
-        acts.push(Action { kind: 3, amount: None }); // RAISE_TO
+        acts.push(Action {
+            kind: 3,
+            amount: None,
+        }); // RAISE_TO
         return Ok(LegalActionInfo::new(
             acts,
             Some(min_to),
@@ -786,7 +810,10 @@ fn legal_actions_from(s: &GameState) -> PyResult<LegalActionInfo> {
     }
     Ok(LegalActionInfo::new(acts, None, None, None))
 }
-fn advance_round_if_needed_internal(n: usize, s: &mut GameState) -> PyResult<(bool, Option<Vec<i32>>, u64)> {
+fn advance_round_if_needed_internal(
+    n: usize,
+    s: &mut GameState,
+) -> PyResult<(bool, Option<Vec<i32>>, u64)> {
     if let Some(lone) = one_survivor(s) {
         let mut rewards = vec![0i32; n];
         for i in 0..n {
@@ -859,9 +886,7 @@ impl NLHEngine {
         seed: Option<u64>,
     ) -> PyResult<Self> {
         if num_players != 6 {
-            return Err(PyValueError::new_err(
-                "Engine fixed to 6 players per spec",
-            ));
+            return Err(PyValueError::new_err("Engine fixed to 6 players per spec"));
         }
         let rng = match seed {
             Some(s) => StdRng::seed_from_u64(s),
@@ -1116,10 +1141,29 @@ impl NLHEngine {
         py_state: &Bound<'py, pyo3::PyAny>,
         a: &Action,
     ) -> PyResult<(bool, Option<Vec<i32>>)> {
+        // Fast path: if py_state is a PyO3 GameState, clone the internal state directly.
+        if let Ok(cell) = py_state.downcast::<PyCell<GameState>>() {
+            let (done, rewards, _last_log, _mask) = {
+                let s_mut = self
+                    .cur
+                    .as_mut()
+                    .ok_or_else(|| PyValueError::new_err("no state"))?;
+                NLHEEngine::step_on_internal(self.n, s_mut, a)?
+            };
+            let cloned = self.cur.as_ref().unwrap().clone();
+            *cell.borrow_mut() = cloned;
+            return Ok((done, rewards));
+        }
+
         // --- SNAPSHOT BEFORE (immutable) ---
         let (board_len_before, round_before, _prev_players) = {
-            let s = self.cur.as_ref().ok_or_else(|| PyValueError::new_err("no state"))?;
-            let snap: Vec<(i32,i32,i32,i64,String)> = s.players.iter()
+            let s = self
+                .cur
+                .as_ref()
+                .ok_or_else(|| PyValueError::new_err("no state"))?;
+            let snap: Vec<(i32, i32, i32, i64, String)> = s
+                .players
+                .iter()
                 .map(|p| (p.stack, p.bet, p.cont, p.rho, p.status.clone()))
                 .collect();
             (s.board.len(), s.round_label.clone(), snap)
@@ -1127,7 +1171,10 @@ impl NLHEngine {
 
         // --- MUTATE RUST STATE ---
         let (done, rewards, _last_log, changed_mask) = {
-            let s_mut = self.cur.as_mut().ok_or_else(|| PyValueError::new_err("no state"))?;
+            let s_mut = self
+                .cur
+                .as_mut()
+                .ok_or_else(|| PyValueError::new_err("no state"))?;
             NLHEngine::step_on_internal(self.n, s_mut, a)?
         };
 
@@ -1164,7 +1211,15 @@ impl NLHEngine {
         if let Some((i, aid, amt, rid)) = s2.actions_log.last().cloned() {
             let al_obj = py_state.getattr("actions_log")?;
             let al_py = al_obj.downcast::<PyList>()?;
-            let tup = PyTuple::new_bound(py, &[i.into_py(py), aid.into_py(py), amt.into_py(py), rid.into_py(py)]);
+            let tup = PyTuple::new_bound(
+                py,
+                &[
+                    i.into_py(py),
+                    aid.into_py(py),
+                    amt.into_py(py),
+                    rid.into_py(py),
+                ],
+            );
             al_py.append(tup)?;
             py_state.setattr("actions_log", al_py)?;
         }
@@ -1179,9 +1234,9 @@ impl NLHEngine {
             for (idx, p_new) in s2.players.iter().enumerate() {
                 let p_obj = players_py.get_item(idx)?;
                 p_obj.setattr("stack", p_new.stack)?;
-                p_obj.setattr("bet",   p_new.bet  )?;
-                p_obj.setattr("cont",  p_new.cont )?;
-                p_obj.setattr("rho",   p_new.rho  )?;
+                p_obj.setattr("bet", p_new.bet)?;
+                p_obj.setattr("cont", p_new.cont)?;
+                p_obj.setattr("rho", p_new.rho)?;
                 p_obj.setattr("status", p_new.status.clone())?;
             }
         } else {
@@ -1210,15 +1265,35 @@ impl NLHEngine {
         py: Python<'py>,
         py_state: &Bound<'py, pyo3::PyAny>,
     ) -> PyResult<(bool, Option<Vec<i32>>)> {
+        // If py_state is a PyO3 GameState, clone the internal state after advancing.
+        if let Ok(cell) = py_state.downcast::<PyCell<GameState>>() {
+            let (done, rewards, _mask) = {
+                let s_mut = self
+                    .cur
+                    .as_mut()
+                    .ok_or_else(|| PyValueError::new_err("no state"))?;
+                advance_round_if_needed_internal(self.n, s_mut)?
+            };
+            let cloned = self.cur.as_ref().unwrap().clone();
+            *cell.borrow_mut() = cloned;
+            return Ok((done, rewards));
+        }
+
         // --- SNAPSHOT BEFORE ---
         let (board_len_before, round_before) = {
-            let s = self.cur.as_ref().ok_or_else(|| PyValueError::new_err("no state"))?;
+            let s = self
+                .cur
+                .as_ref()
+                .ok_or_else(|| PyValueError::new_err("no state"))?;
             (s.board.len(), s.round_label.clone())
         };
 
         // --- MUTATE RUST STATE ---
         let (done, rewards, _round_reset_mask) = {
-            let s_mut = self.cur.as_mut().ok_or_else(|| PyValueError::new_err("no state"))?;
+            let s_mut = self
+                .cur
+                .as_mut()
+                .ok_or_else(|| PyValueError::new_err("no state"))?;
             advance_round_if_needed_internal(self.n, s_mut)?
         };
 
@@ -1251,7 +1326,15 @@ impl NLHEngine {
         if let Some((i, aid, amt, rid)) = s2.actions_log.last().cloned() {
             let al_obj = py_state.getattr("actions_log")?;
             let al_py = al_obj.downcast::<PyList>()?;
-            let tup = PyTuple::new_bound(py, &[i.into_py(py), aid.into_py(py), amt.into_py(py), rid.into_py(py)]);
+            let tup = PyTuple::new_bound(
+                py,
+                &[
+                    i.into_py(py),
+                    aid.into_py(py),
+                    amt.into_py(py),
+                    rid.into_py(py),
+                ],
+            );
             al_py.append(tup)?;
             py_state.setattr("actions_log", al_py)?;
         }
@@ -1275,7 +1358,10 @@ impl NLHEngine {
     /// Fast legal-actions: return (mask, min_to, max_to, has_rr)
     /// mask bits: 1=FOLD, 2=CHECK, 4=CALL, 8=RAISE_TO
     fn legal_actions_bits_now(&self) -> PyResult<(u8, Option<i32>, Option<i32>, Option<bool>)> {
-        let s = self.cur.as_ref().ok_or_else(|| PyValueError::new_err("no state"))?;
+        let s = self
+            .cur
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("no state"))?;
         let i = match s.next_to_act {
             Some(x) => x,
             None => return Ok((0, None, None, None)),
@@ -1287,9 +1373,15 @@ impl NLHEngine {
 
         let owe = (s.current_bet - p.bet).max(0);
         let mut mask: u8 = 0;
-        if owe > 0 { mask |= 1; } // FOLD
-        if owe == 0 { mask |= 2; } // CHECK
-        if owe > 0 { mask |= 4; } // CALL
+        if owe > 0 {
+            mask |= 1;
+        } // FOLD
+        if owe == 0 {
+            mask |= 2;
+        } // CHECK
+        if owe > 0 {
+            mask |= 4;
+        } // CALL
 
         let can_raise = (p.status == "active") && (p.stack > 0);
         if !can_raise {
@@ -1334,8 +1426,12 @@ impl NLHEngine {
             .collect();
 
         for i in 0..self.n {
-            let c1 = deck.pop().ok_or_else(|| PyValueError::new_err("deck underflow"))?;
-            let c2 = deck.pop().ok_or_else(|| PyValueError::new_err("deck underflow"))?;
+            let c1 = deck
+                .pop()
+                .ok_or_else(|| PyValueError::new_err("deck underflow"))?;
+            let c2 = deck
+                .pop()
+                .ok_or_else(|| PyValueError::new_err("deck underflow"))?;
             players[i].hole = Some((c1, c2));
         }
 
@@ -1462,13 +1558,11 @@ impl NLHEngine {
             3 => {
                 // RAISE_TO
                 changed |= 1 << i;
-                let raise_to =
-                    a.amount
-                        .ok_or_else(|| PyValueError::new_err("RAISE_TO requires amount"))?;
+                let raise_to = a
+                    .amount
+                    .ok_or_else(|| PyValueError::new_err("RAISE_TO requires amount"))?;
                 if raise_to <= s.current_bet {
-                    return Err(PyValueError::new_err(
-                        "raise_to must exceed current_bet",
-                    ));
+                    return Err(PyValueError::new_err("raise_to must exceed current_bet"));
                 }
                 let max_to = s.players[i].bet + s.players[i].stack;
                 if raise_to > max_to {
