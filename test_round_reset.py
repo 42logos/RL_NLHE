@@ -4,7 +4,14 @@ Test to verify that round reset behavior works correctly when transitioning betw
 This test checks that player.bet values are properly reset to 0 when advancing from preflop to flop.
 """
 
-import nlhe_engine
+import importlib.util, importlib.machinery, pathlib
+spec = importlib.util.find_spec("nlhe_engine")
+suffix = importlib.machinery.EXTENSION_SUFFIXES[0]
+lib_path = pathlib.Path(spec.origin).with_name(f"nlhe_engine{suffix}")
+spec = importlib.util.spec_from_file_location("nlhe_engine", lib_path)
+nlhe_engine = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(nlhe_engine)  # type: ignore[arg-type]
 from nlhe.core.types import ActionType
 
 def test_round_reset():
@@ -48,6 +55,7 @@ def test_round_reset():
     while state.next_to_act is not None and state.round_label == "Preflop":
         idx = state.next_to_act
         owe = state.current_bet - state.players[idx].bet
+        # The big blind (or any fully invested player) owes zero chips and must CHECK; CALL would raise ValueError.
         action = 2 if owe > 0 else 1  # 0=FOLD,1=CHECK,2=CALL,3=RAISE_TO
         print(f"Player {idx} taking action {ActionType(action + 1).name}")
         done, rewards = engine.step_apply_py_raw(state, action, None)
