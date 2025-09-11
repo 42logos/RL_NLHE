@@ -75,28 +75,29 @@ class NLHEGui(QtWidgets.QMainWindow):
 
         icons_dir = Path(__file__).with_name("assets") / "icons"
         btn_specs = {
+            # colours align with player panel states in styles.qss
             "FOLD": (
                 "fold.svg",
-                "#d32f2f",
-                "#ef9a9a",
+                "#9e9e9e",
+                "#c4c4c4",
                 "Forfeit the hand",
             ),
             "CHECK": (
                 "check.svg",
-                "#388e3c",
-                "#a5d6a7",
+                "#4c5f54",
+                "#939f98",
                 "Pass action without betting",
             ),
             "CALL": (
                 "call.svg",
-                "#388e3c",
-                "#a5d6a7",
+                "#4c5f54",
+                "#939f98",
                 "Match the current bet",
             ),
             "RAISE": (
                 "raise.svg",
-                "#1976d2",
-                "#90caf9",
+                "#ea9c28",
+                "#f2c37e",
                 "Increase the bet amount",
             ),
         }
@@ -115,6 +116,24 @@ class NLHEGui(QtWidgets.QMainWindow):
             )
             btn.setToolTip(tip)
             btn.clicked.connect(lambda _, n=name: self._on_action(n))
+
+            # simple press animation to give visual feedback
+            effect = QtWidgets.QGraphicsOpacityEffect(btn)
+            btn.setGraphicsEffect(effect)
+            anim = QtCore.QSequentialAnimationGroup(btn)
+            fade_out = QtCore.QPropertyAnimation(effect, b"opacity")
+            fade_out.setDuration(100)
+            fade_out.setStartValue(1.0)
+            fade_out.setEndValue(0.3)
+            fade_in = QtCore.QPropertyAnimation(effect, b"opacity")
+            fade_in.setDuration(150)
+            fade_in.setStartValue(0.3)
+            fade_in.setEndValue(1.0)
+            anim.addAnimation(fade_out)
+            anim.addAnimation(fade_in)
+            btn.pressed.connect(anim.start)
+            btn._press_anim = anim  # keep reference
+
             btn_layout.addWidget(btn)
             self.action_buttons[name] = btn
 
