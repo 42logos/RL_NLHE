@@ -72,9 +72,68 @@ class NLHEGui(QtWidgets.QMainWindow):
         btn_layout = QtWidgets.QHBoxLayout()
         main.addLayout(btn_layout)
         self.action_buttons: Dict[str, QtWidgets.QPushButton] = {}
-        for name in ["FOLD", "CHECK", "CALL", "RAISE"]:
+
+        icons_dir = Path(__file__).with_name("assets") / "icons"
+        btn_specs = {
+            # colours align with player panel states in styles.qss
+            "FOLD": (
+                "fold.svg",
+                "#9e9e9e",
+                "#c4c4c4",
+                "Forfeit the hand",
+            ),
+            "CHECK": (
+                "check.svg",
+                "#4c5f54",
+                "#939f98",
+                "Pass action without betting",
+            ),
+            "CALL": (
+                "call.svg",
+                "#4c5f54",
+                "#939f98",
+                "Match the current bet",
+            ),
+            "RAISE": (
+                "raise.svg",
+                "#ea9c28",
+                "#f2c37e",
+                "Increase the bet amount",
+            ),
+        }
+
+        for name, (icon_file, color, disabled, tip) in btn_specs.items():
             btn = QtWidgets.QPushButton(name)
+            btn.setIcon(QtGui.QIcon(str(icons_dir / icon_file)))
+            btn.setIconSize(QtCore.QSize(16, 16))
+            btn.setStyleSheet(
+                "QPushButton {"
+                f"background-color: {color}; color: white; font-weight: bold;"
+                "}"
+                "QPushButton:disabled {"
+                f"background-color: {disabled}; color: white;"
+                "}"
+            )
+            btn.setToolTip(tip)
             btn.clicked.connect(lambda _, n=name: self._on_action(n))
+
+            # simple press animation to give visual feedback
+            effect = QtWidgets.QGraphicsOpacityEffect(btn)
+            btn.setGraphicsEffect(effect)
+            anim = QtCore.QSequentialAnimationGroup(btn)
+            fade_out = QtCore.QPropertyAnimation(effect, b"opacity")
+            fade_out.setDuration(100)
+            fade_out.setStartValue(1.0)
+            fade_out.setEndValue(0.3)
+            fade_in = QtCore.QPropertyAnimation(effect, b"opacity")
+            fade_in.setDuration(150)
+            fade_in.setStartValue(0.3)
+            fade_in.setEndValue(1.0)
+            anim.addAnimation(fade_out)
+            anim.addAnimation(fade_in)
+            btn.pressed.connect(anim.start)
+            btn._press_anim = anim  # keep reference
+
             btn_layout.addWidget(btn)
             self.action_buttons[name] = btn
 

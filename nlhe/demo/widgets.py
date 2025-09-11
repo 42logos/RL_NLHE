@@ -268,6 +268,11 @@ class PlayerPanel(QtWidgets.QFrame):
         self.last.setAttribute(
             QtCore.Qt.WidgetAttribute.WA_StyledBackground, True
         )
+        self.last.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Preferred,
+            QtWidgets.QSizePolicy.Policy.Fixed,
+        )
+        self.last.setFixedHeight(24)
         lay.addWidget(self.last)
 
         margins = lay.contentsMargins()
@@ -322,6 +327,9 @@ class PlayerPanel(QtWidgets.QFrame):
                 state = "folded"
                 last_txt = "fold"
         self.last.setText(last_txt)
+        self.last.setProperty("state", state)
+        self.last.style().unpolish(self.last)
+        self.last.style().polish(self.last)
 
         self.setProperty("active", active)
         self.setProperty("state", state)

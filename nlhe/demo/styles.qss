@@ -44,7 +44,26 @@ QLabel#badge {
 QLabel#status-label {
     border-radius: 4px;
     padding: 2px 4px;
-    background-color: #8f049cff;
     color: #ffffff;
     font-weight: bold;
+}
+
+QLabel#status-label[state="default"] {
+    background-color: #8f049cff;
+}
+
+QLabel#status-label[state="folded"] {
+    background-color: #9e9e9e;
+}
+
+QLabel#status-label[state="allin"] {
+    background-color: #d32f2f;
+}
+
+QLabel#status-label[state="called"] {
+    background-color: #4c5f54ff;
+}
+
+QLabel#status-label[state="raised"] {
+    background-color: #ea9c28ff;
 }
