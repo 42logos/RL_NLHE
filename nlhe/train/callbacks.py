@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 from gymnasium import Env
-from ray.rllib.callbacks.callbacks import RLlibCallback
+# RLlib moved its callback base class in newer versions; try both locations.
+try:  # Ray >= 2.0 used "ray.rllib.callbacks.callbacks"
+    from ray.rllib.callbacks.callbacks import RLlibCallback  # type: ignore
+except Exception:  # Ray >= 2.40 exposes DefaultCallbacks instead
+    from ray.rllib.algorithms.callbacks import DefaultCallbacks as RLlibCallback  # type: ignore
 from ray.rllib.core.rl_module.rl_module import RLModule
 from ray.rllib.env.base_env import BaseEnv
 from ray.rllib.env.env_runner import EnvRunner

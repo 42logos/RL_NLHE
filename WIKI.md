@@ -198,6 +198,14 @@ from nlhe.agents.human_cli import HumanAgent
 agent = HumanAgent()
 ```
 
+#### CKPTAgent
+Run a trained RLlib policy from a saved checkpoint:
+```python
+from nlhe.agents.ckpt_agent import CKPTAgent
+
+agent = CKPTAgent("./checkpoints/last_ckpt")
+```
+
 ### Creating Custom Agents
 
 Example custom agent template:
@@ -692,6 +700,8 @@ config = {
 
 results = train_ppo(config)
 ```
+
+> **Tip:** CPU-only machines can set `train_settings.use_gpu: false` in the Hydra config to disable GPU allocation.
 
 #### Callbacks
 ```python
