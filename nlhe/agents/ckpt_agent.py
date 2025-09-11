@@ -4,7 +4,6 @@ import numpy as np
 
 from ..core.types import Action, ActionType, GameState
 from .base import Agent, EngineLike
-from ..utils.restore_algo import restore_algorithm
 
 SENTINEL = -1
 
@@ -14,7 +13,7 @@ class CKPTAgent(Agent):
         from ray.rllib.algorithms.algorithm import Algorithm
         self.history_len = history_len
         # load algorithm from checkpoint
-        self.algo = restore_algorithm(checkpoint_path)
+        self.algo = Algorithm.from_checkpoint(checkpoint_path)
         # put model into eval mode if possible
         try:
             policy = self.algo.get_policy()
