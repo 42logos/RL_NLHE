@@ -919,12 +919,14 @@ impl NLHEngine {
         let board_py = board_obj.downcast::<PyList>()?;
         let empty_list = pyo3::types::PyList::empty_bound(py);
         board_py.set_slice(0, board_py.len(), &empty_list)?;
+        py_state.setattr("board", board_py)?;
 
         // actions_log: clear
         let al_obj = py_state.getattr("actions_log")?;
         let al_py = al_obj.downcast::<PyList>()?;
         let empty_list2 = pyo3::types::PyList::empty_bound(py);
         al_py.set_slice(0, al_py.len(), &empty_list2)?;
+        py_state.setattr("actions_log", al_py)?;
 
         // players: update in-place; assume list length is fixed at N
         let players_obj = py_state.getattr("players")?;
@@ -938,6 +940,7 @@ impl NLHEngine {
             p_obj.setattr("status", p_new.status.clone())?;
             p_obj.setattr("rho", p_new.rho)?;
         }
+        py_state.setattr("players", players_py)?;
 
         Ok(())
     }
@@ -1153,6 +1156,8 @@ impl NLHEngine {
             for &c in &s2.board[board_len_before..] {
                 board_py.append(c)?;
             }
+            // Reassign: #[pyo3(get, set)] returns a fresh list
+            py_state.setattr("board", board_py)?;
         }
 
         // actions_log: push last entry (always one new)
@@ -1161,6 +1166,7 @@ impl NLHEngine {
             let al_py = al_obj.downcast::<PyList>()?;
             let tup = PyTuple::new_bound(py, &[i.into_py(py), aid.into_py(py), amt.into_py(py), rid.into_py(py)]);
             al_py.append(tup)?;
+            py_state.setattr("actions_log", al_py)?;
         }
 
         // players: update only changed ones using the bitmask
@@ -1238,6 +1244,7 @@ impl NLHEngine {
             for &c in &s2.board[board_len_before..] {
                 board_py.append(c)?;
             }
+            py_state.setattr("board", board_py)?;
         }
 
         // push last log if any
@@ -1246,6 +1253,7 @@ impl NLHEngine {
             let al_py = al_obj.downcast::<PyList>()?;
             let tup = PyTuple::new_bound(py, &[i.into_py(py), aid.into_py(py), amt.into_py(py), rid.into_py(py)]);
             al_py.append(tup)?;
+            py_state.setattr("actions_log", al_py)?;
         }
 
         // players: update all (advance_round affects multiple players)
