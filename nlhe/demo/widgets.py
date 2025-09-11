@@ -264,10 +264,11 @@ class PlayerPanel(QtWidgets.QFrame):
         lay.addLayout(cards_row)
 
         self.last = QtWidgets.QLabel("")
-        self.last.setObjectName("status-label")
+        self.last.setObjectName("action-label")
         self.last.setAttribute(
             QtCore.Qt.WidgetAttribute.WA_StyledBackground, True
         )
+        self.last.hide()
         lay.addWidget(self.last)
 
         margins = lay.contentsMargins()
@@ -322,6 +323,7 @@ class PlayerPanel(QtWidgets.QFrame):
                 state = "folded"
                 last_txt = "fold"
         self.last.setText(last_txt)
+        self.last.setVisible(bool(last_txt))
 
         self.setProperty("active", active)
         self.setProperty("state", state)

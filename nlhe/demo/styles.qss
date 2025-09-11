@@ -33,6 +33,30 @@
     color: #ffffff;
 }
 
+#player-panel QLabel#action-label {
+    border-radius: 4px;
+    padding: 2px 4px;
+    color: #ffffff;
+    font-weight: bold;
+    background-color: #4c5f54ff;
+}
+
+#player-panel[state="folded"] QLabel#action-label {
+    background-color: #9e9e9e;
+}
+
+#player-panel[state="allin"] QLabel#action-label {
+    background-color: #d32f2f;
+}
+
+#player-panel[state="called"] QLabel#action-label {
+    background-color: #4c5f54ff;
+}
+
+#player-panel[state="raised"] QLabel#action-label {
+    background-color: #ea9c28ff;
+}
+
 QLabel#badge {
     border-radius: 12px;
     padding: 0 6px;
