@@ -72,8 +72,48 @@ class NLHEGui(QtWidgets.QMainWindow):
         btn_layout = QtWidgets.QHBoxLayout()
         main.addLayout(btn_layout)
         self.action_buttons: Dict[str, QtWidgets.QPushButton] = {}
-        for name in ["FOLD", "CHECK", "CALL", "RAISE"]:
+
+        icons_dir = Path(__file__).with_name("assets") / "icons"
+        btn_specs = {
+            "FOLD": (
+                "fold.svg",
+                "#d32f2f",
+                "#ef9a9a",
+                "Forfeit the hand",
+            ),
+            "CHECK": (
+                "check.svg",
+                "#388e3c",
+                "#a5d6a7",
+                "Pass action without betting",
+            ),
+            "CALL": (
+                "call.svg",
+                "#388e3c",
+                "#a5d6a7",
+                "Match the current bet",
+            ),
+            "RAISE": (
+                "raise.svg",
+                "#1976d2",
+                "#90caf9",
+                "Increase the bet amount",
+            ),
+        }
+
+        for name, (icon_file, color, disabled, tip) in btn_specs.items():
             btn = QtWidgets.QPushButton(name)
+            btn.setIcon(QtGui.QIcon(str(icons_dir / icon_file)))
+            btn.setIconSize(QtCore.QSize(16, 16))
+            btn.setStyleSheet(
+                "QPushButton {"
+                f"background-color: {color}; color: white; font-weight: bold;"
+                "}"
+                "QPushButton:disabled {"
+                f"background-color: {disabled}; color: white;"
+                "}"
+            )
+            btn.setToolTip(tip)
             btn.clicked.connect(lambda _, n=name: self._on_action(n))
             btn_layout.addWidget(btn)
             self.action_buttons[name] = btn
