@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
+from pathlib import Path
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
@@ -96,48 +97,121 @@ class ChipLabel(QtWidgets.QLabel):
 class BetChip(QtWidgets.QWidget):
     """Chip-style widget showing the player's current bet with animation."""
 
+    _base_pix: Optional[QtGui.QPixmap] = None
+    _highlight_pix: Optional[QtGui.QPixmap] = None
+
     def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
         super().__init__(parent)
         self._amt = 0
         self._base = 32
         self._max = int(self._base * 1.5)
-        self._apply_size(self._base)
+
+        self._label = QtWidgets.QLabel(self)
+        self._label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        shadow = QtWidgets.QGraphicsDropShadowEffect(self._label)
+        shadow.setBlurRadius(8)
+        shadow.setOffset(0, 1)
+        shadow.setColor(QtGui.QColor(0, 0, 0, 160))
+        self._label.setGraphicsEffect(shadow)
+
         self._effect = QtWidgets.QGraphicsOpacityEffect(self)
         self.setGraphicsEffect(self._effect)
         self._effect.setOpacity(1.0)
 
+        self._apply_size(self._base)
+
+    @classmethod
+    def _asset_dir(cls) -> Path:
+        return Path(__file__).with_name("assets") / "chips"
+
+    @classmethod
+    def _load_pixmaps(cls) -> None:
+        if cls._base_pix is None:
+            base_path = cls._asset_dir() / "chip_base.png"
+            hl_path = cls._asset_dir() / "chip_highlight.png"
+            cls._base_pix = QtGui.QPixmap(str(base_path))
+            cls._highlight_pix = QtGui.QPixmap(str(hl_path))
+
     def _apply_size(self, s: int) -> None:
         self._size = s
         self.setFixedSize(s, s)
-        self.update()
+        self._label.setFixedSize(s, s)
+        self._update_pixmap()
 
     @property
     def max_size(self) -> int:
         return self._max
 
+    @staticmethod
+    def color_for_amount(amt: int) -> QtGui.QColor:
+        if amt < 5:
+            return QtGui.QColor("white")
+        if amt < 25:
+            return QtGui.QColor("#d43333")
+        if amt < 100:
+            return QtGui.QColor("#268c3c")
+        if amt < 500:
+            return QtGui.QColor("#4185d4")
+        return QtGui.QColor("#1c1c1c")
+
     def set_amount(self, amt: int) -> None:
         self._amt = amt
         self.setVisible(amt > 0)
-        self.update()
+        self._update_pixmap()
 
-    def paintEvent(self, _: QtGui.QPaintEvent) -> None:  # pragma: no cover - GUI paint
-        p = QtGui.QPainter(self)
-        p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-        s = self._size
-        p.setBrush(QtGui.QColor("#d43333"))
-        p.setPen(QtGui.QPen(QtGui.QColor("white"), 2))
-        p.drawEllipse(0, 0, s - 1, s - 1)
-        p.drawEllipse(3, 3, s - 7, s - 7)
-        p.setPen(QtGui.QPen(QtGui.QColor("white"), 3))
-        for ang in range(0, 360, 45):
-            p.drawArc(3, 3, s - 7, s - 7, ang * 16, 10 * 16)
+    def _update_pixmap(self) -> None:
+        s = getattr(self, "_size", self._base)
+        self._load_pixmaps()
+        if self._base_pix is None or self._base_pix.isNull():
+            pix = QtGui.QPixmap(s, s)
+            pix.fill(QtCore.Qt.GlobalColor.transparent)
+            p = QtGui.QPainter(pix)
+            p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+            color = self.color_for_amount(self._amt)
+            p.setBrush(color)
+            p.setPen(QtGui.QPen(QtGui.QColor("white"), 2))
+            p.drawEllipse(0, 0, s - 1, s - 1)
+            p.drawEllipse(3, 3, s - 7, s - 7)
+            p.setPen(QtGui.QPen(QtGui.QColor("white"), 3))
+            for ang in range(0, 360, 45):
+                p.drawArc(3, 3, s - 7, s - 7, ang * 16, 10 * 16)
+        else:
+            base = self._base_pix.scaled(
+                s,
+                s,
+                QtCore.Qt.AspectRatioMode.IgnoreAspectRatio,
+                QtCore.Qt.TransformationMode.SmoothTransformation,
+            )
+            tinted = QtGui.QPixmap(base.size())
+            tinted.fill(QtCore.Qt.GlobalColor.transparent)
+            p = QtGui.QPainter(tinted)
+            p.fillRect(tinted.rect(), self.color_for_amount(self._amt))
+            p.setCompositionMode(QtGui.QPainter.CompositionMode.DestinationIn)
+            p.drawPixmap(0, 0, base)
+            p.end()
+
+            pix = QtGui.QPixmap(tinted)
+            p = QtGui.QPainter(pix)
+            if self._highlight_pix and not self._highlight_pix.isNull():
+                p.drawPixmap(
+                    0,
+                    0,
+                    self._highlight_pix.scaled(
+                        s,
+                        s,
+                        QtCore.Qt.AspectRatioMode.IgnoreAspectRatio,
+                        QtCore.Qt.TransformationMode.SmoothTransformation,
+                    ),
+                )
         font = p.font()
         font.setBold(True)
         font.setPointSize(max(8, int(s / 2)))
         p.setFont(font)
         p.setPen(QtGui.QColor("white"))
-        p.drawText(self.rect(), QtCore.Qt.AlignmentFlag.AlignCenter, str(self._amt))
+        p.drawText(QtCore.QRect(0, 0, s, s), QtCore.Qt.AlignmentFlag.AlignCenter, str(self._amt))
         p.end()
+
+        self._label.setPixmap(pix)
 
     def animate(self) -> None:
         self._effect.setOpacity(0.0)
