@@ -1193,6 +1193,7 @@ impl NLHEngine {
                 p_obj.setattr("status", p_new.status.clone())?;
             }
         }
+        py_state.setattr("players", players_py)?;
 
         Ok((done, rewards))
     }
@@ -1258,6 +1259,7 @@ impl NLHEngine {
             p_obj.setattr("rho", p_new.rho)?;
             p_obj.setattr("status", p_new.status.clone())?;
         }
+        py_state.setattr("players", players_py)?;
 
         Ok((done, rewards))
     }
