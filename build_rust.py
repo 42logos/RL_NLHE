@@ -96,7 +96,8 @@ def build_with_maturin(py: str, crate: Path, module: str, global_install: bool =
     """
     if not ensure_cmd("maturin"):
         print("maturin not found; installing via pip", file=sys.stderr)
-        run([py, "-m", "pip", "install", "maturin"])
+        # suppress root warnings during installation
+        run([py, "-m", "pip", "install", "--root-user-action", "ignore", "maturin"])
     if global_install:
         wheel_dir = crate / "target" / "wheels"
         run(
@@ -115,7 +116,17 @@ def build_with_maturin(py: str, crate: Path, module: str, global_install: bool =
         wheels = list(wheel_dir.glob("*.whl"))
         if not wheels:
             raise SystemExit(f"no wheel built in {wheel_dir}")
-        run([py, "-m", "pip", "install", "--force-reinstall", str(wheels[0])])
+        # reinstall the wheel while ignoring root warnings
+        run([
+            py,
+            "-m",
+            "pip",
+            "install",
+            "--root-user-action",
+            "ignore",
+            "--force-reinstall",
+            str(wheels[0]),
+        ])
     else:
         run([py, "-m", "maturin", "develop", "--release", "-m", str(crate / "Cargo.toml")])
     run([py, "-c", f"import {module},sys;print('{module} imported', {module}.__file__)"])
