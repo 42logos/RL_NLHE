@@ -6,7 +6,7 @@ from pathlib import Path
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from ..core.cards import rank_of, suit_of
-from ..core.types import PlayerState
+from ..core.types import PlayerState, ActionType
 
 
 class CardWidget(QtWidgets.QLabel):
@@ -311,12 +311,14 @@ class PlayerPanel(QtWidgets.QFrame):
             last_txt = "all-in"
         elif last is not None:
             aid, amt = last
-            if aid == 1:
+            action_type = ActionType(aid)
+            if action_type == ActionType.CHECK:
+                state = "checked"
                 last_txt = "check"
-            elif aid == 2:
+            elif action_type == ActionType.CALL:
                 state = "called"
                 last_txt = "call"
-            elif aid == 3:
+            elif action_type == ActionType.RAISE_TO:
                 state = "raised"
                 last_txt = f"raise to {amt}"
             else:
