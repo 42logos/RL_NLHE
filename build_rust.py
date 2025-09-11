@@ -96,7 +96,8 @@ def build_with_maturin(py: str, crate: Path, module: str, global_install: bool =
     """
     if not ensure_cmd("maturin"):
         print("maturin not found; installing via pip", file=sys.stderr)
-        run([py, "-m", "pip", "install", "maturin"])
+        # suppress root warnings during installation
+        run([py, "-m", "pip", "install", "--root-user-action", "ignore", "maturin"])
     if global_install:
         wheel_dir = crate / "target" / "wheels"
         run(
@@ -115,7 +116,17 @@ def build_with_maturin(py: str, crate: Path, module: str, global_install: bool =
         wheels = list(wheel_dir.glob("*.whl"))
         if not wheels:
             raise SystemExit(f"no wheel built in {wheel_dir}")
-        run([py, "-m", "pip", "install", "--force-reinstall", str(wheels[0])])
+        # reinstall the wheel while ignoring root warnings
+        run([
+            py,
+            "-m",
+            "pip",
+            "install",
+            "--root-user-action",
+            "ignore",
+            "--force-reinstall",
+            str(wheels[0]),
+        ])
     else:
         run([py, "-m", "maturin", "develop", "--release", "-m", str(crate / "Cargo.toml")])
     run([py, "-c", f"import {module},sys;print('{module} imported', {module}.__file__)"])
@@ -165,17 +176,17 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.crate_dir == "both":
+        repo_root = Path(__file__).resolve().parent
+        py, using_global = resolve_python(
+            repo_root / args.venv, allow_global=args.allow_global
+        )
         for dir in ("nlhe_eval", "rs_engine"):
             print(f"Building {dir}")
             args.crate_dir = dir
-            repo_root = Path(__file__).resolve().parent
             crate = repo_root / 'nlhe' / args.crate_dir
             if not crate.exists():
                 raise SystemExit(f"crate directory {crate!r} not found")
             module = args.module_name or get_crate_name(crate)
-            py, using_global = resolve_python(
-                repo_root / args.venv, allow_global=args.allow_global
-            )
 
             if args.use_maturin:
                 build_with_maturin(py, crate, module, global_install=using_global)
