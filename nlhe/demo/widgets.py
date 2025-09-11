@@ -311,7 +311,8 @@ class PlayerPanel(QtWidgets.QFrame):
             last_txt = "all-in"
         elif last is not None:
             aid, amt = last
-            action_type = ActionType(aid)
+            # actions_log encodes action IDs as 0-based ints; map via list index
+            action_type = list(ActionType)[aid]
             if action_type == ActionType.CHECK:
                 state = "checked"
                 last_txt = "check"
