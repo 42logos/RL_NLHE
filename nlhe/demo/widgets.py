@@ -324,12 +324,16 @@ class PlayerPanel(QtWidgets.QFrame):
                 last_txt = "fold"
         self.last.setText(last_txt)
         self.last.setVisible(bool(last_txt))
+        self.last.setProperty("state", state)
+        self.last.style().unpolish(self.last)
+        self.last.style().polish(self.last)
 
         self.setProperty("active", active)
         self.setProperty("state", state)
         self.style().unpolish(self)
         self.style().polish(self)
         # call QWidget.update to refresh after re-polishing style
+        self.last.update()
         super().update()
 
 
