@@ -8,7 +8,8 @@ train_settings:
   clip_grad_norm: 77
   gamma: 0.8
   shuffle_batches: true
-  num_env_runners: 12
+  num_env_runners: 6
+  use_gpu: false
 
 network_settings: 
   fc_hidden_sizes: [256, 256]
@@ -16,7 +17,7 @@ network_settings:
   head_hidden_sizes: [128]
   head_activation: relu
   use_lstm: false
-  lstm_hidden_size: 128
+  lstm_hidden_size: 64
   free_log_std: false
 
 env_settings:

@@ -5,6 +5,8 @@ from .types import Action as PyAction, ActionType, LegalActionInfo as PyLegalAct
 
 try:
     import nlhe_engine as _rs
+    if not hasattr(_rs, "NLHEngine") :
+        raise ImportError("Rust backend not found: incomplete stub")
 except Exception as e:
     raise ImportError(f"Rust backend not found: {e}")
 

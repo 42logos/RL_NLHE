@@ -41,13 +41,14 @@ nlhe/
     base.py       # Protocols: Agent, EngineLike
     tamed_random.py
     human_cli.py  # demo-only
+    ckpt_agent.py # load RLlib checkpoints
   envs/
     gym_env.py    # NLHEGymEnv (Discrete action space)
     param_env.py  # NLHEParamEnv (atype + continuous r)
   demo/
     cli.py        # run_hand_cli() interactive demo
 ```
-**Public API modules:** `nlhe.core.*`, `nlhe.agents.base`, `nlhe.agents.tamed_random`, `nlhe.envs.*`, `nlhe.demo.cli`.
+**Public API modules:** `nlhe.core.*`, `nlhe.agents.base`, `nlhe.agents.tamed_random`, `nlhe.agents.ckpt_agent`, `nlhe.envs.*`, `nlhe.demo.cli`.
 
 ---
 
@@ -211,6 +212,11 @@ class Agent(Protocol):
 
 ### 9.3 `HumanAgent` (demo only)
 - Reads from stdin; validates inputs against `LegalActionInfo`.
+
+### 9.4 `CKPTAgent`
+- Loads an RLlib `Algorithm` from a checkpoint and uses it to compute actions.
+- Converts `GameState` to the observation format expected by `NLHEParamEnv`.
+- Deterministic when `compute_single_action(..., explore=False)` is used.
 
 ---
 
