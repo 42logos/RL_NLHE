@@ -55,6 +55,7 @@ def test_round_reset():
     while state.next_to_act is not None and state.round_label == "Preflop":
         idx = state.next_to_act
         owe = state.current_bet - state.players[idx].bet
+        # The big blind (or any fully invested player) owes zero chips and must CHECK; CALL would raise ValueError.
         action = 2 if owe > 0 else 1  # 0=FOLD,1=CHECK,2=CALL,3=RAISE_TO
         print(f"Player {idx} taking action {ActionType(action + 1).name}")
         done, rewards = engine.step_apply_py_raw(state, action, None)
