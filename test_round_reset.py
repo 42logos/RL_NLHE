@@ -4,7 +4,14 @@ Test to verify that round reset behavior works correctly when transitioning betw
 This test checks that player.bet values are properly reset to 0 when advancing from preflop to flop.
 """
 
-import nlhe_engine
+import importlib.util, importlib.machinery, pathlib
+spec = importlib.util.find_spec("nlhe_engine")
+suffix = importlib.machinery.EXTENSION_SUFFIXES[0]
+lib_path = pathlib.Path(spec.origin).with_name(f"nlhe_engine{suffix}")
+spec = importlib.util.spec_from_file_location("nlhe_engine", lib_path)
+nlhe_engine = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(nlhe_engine)  # type: ignore[arg-type]
 from nlhe.core.types import ActionType
 
 def test_round_reset():

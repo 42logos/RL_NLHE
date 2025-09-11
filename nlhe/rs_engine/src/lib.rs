@@ -1,6 +1,7 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PyTuple};
+// no PyCell fast-path imports; attribute updates handle all cases
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -1141,20 +1142,6 @@ impl NLHEngine {
         py_state: &Bound<'py, pyo3::PyAny>,
         a: &Action,
     ) -> PyResult<(bool, Option<Vec<i32>>)> {
-        // Fast path: if py_state is a PyO3 GameState, clone the internal state directly.
-        if let Ok(cell) = py_state.downcast::<PyCell<GameState>>() {
-            let (done, rewards, _last_log, _mask) = {
-                let s_mut = self
-                    .cur
-                    .as_mut()
-                    .ok_or_else(|| PyValueError::new_err("no state"))?;
-                NLHEEngine::step_on_internal(self.n, s_mut, a)?
-            };
-            let cloned = self.cur.as_ref().unwrap().clone();
-            *cell.borrow_mut() = cloned;
-            return Ok((done, rewards));
-        }
-
         // --- SNAPSHOT BEFORE (immutable) ---
         let (board_len_before, round_before, _prev_players) = {
             let s = self
@@ -1175,7 +1162,7 @@ impl NLHEngine {
                 .cur
                 .as_mut()
                 .ok_or_else(|| PyValueError::new_err("no state"))?;
-            NLHEngine::step_on_internal(self.n, s_mut, a)?
+            Self::step_on_internal(self.n, s_mut, a)?
         };
 
         // --- APPLY CHANGES TO PYTHON MIRROR IN ONE CALL ---
@@ -1265,20 +1252,6 @@ impl NLHEngine {
         py: Python<'py>,
         py_state: &Bound<'py, pyo3::PyAny>,
     ) -> PyResult<(bool, Option<Vec<i32>>)> {
-        // If py_state is a PyO3 GameState, clone the internal state after advancing.
-        if let Ok(cell) = py_state.downcast::<PyCell<GameState>>() {
-            let (done, rewards, _mask) = {
-                let s_mut = self
-                    .cur
-                    .as_mut()
-                    .ok_or_else(|| PyValueError::new_err("no state"))?;
-                advance_round_if_needed_internal(self.n, s_mut)?
-            };
-            let cloned = self.cur.as_ref().unwrap().clone();
-            *cell.borrow_mut() = cloned;
-            return Ok((done, rewards));
-        }
-
         // --- SNAPSHOT BEFORE ---
         let (board_len_before, round_before) = {
             let s = self
