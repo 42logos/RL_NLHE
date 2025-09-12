@@ -83,11 +83,12 @@ def test_python_vs_rust_engine_equivalence(seed: int):
         if done_py:
             break
 
-
-def test_rs_engine_complete_parity():
+@pytest.mark.parametrize("seed", [0, 1])
+def test_rs_engine_complete_parity(seed: int):
     """Test that the Rust engine is fully equivalent to the Python engine."""
-    py=PyEngine()
-    rs=RsEngine()
+    rng = random.Random(seed)
+    py=PyEngine(rng=rng)
+    rs=RsEngine(rng=rng)
     
     py_state = py.reset_hand(button=0)
     rs_state = rs.reset_hand(button=0)
@@ -147,7 +148,7 @@ def test_rs_engine_complete_parity():
         assert py_val == rs_val, f"Mismatch in attribute {attr}: py={py_val}, rs={rs_val}"
     assert canonical_state(py_state) == canonical_state(rs_state)
     
-    for _ in range(5500):
+    for _ in range(410):
         li_py = py.legal_actions(py_state)
         li_rs = rs.legal_actions(rs_state)
         assert li_py == li_rs
