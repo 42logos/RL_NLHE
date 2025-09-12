@@ -100,6 +100,7 @@ def test_rs_engine_complete_parity():
             print(f"Error setting player {i} hole cards in rust engine: {e}")
             unsucc.append(i)
     
+    rerun_count=0
     while len(unsucc)>0:
         print(f"Retrying {len(unsucc)} failed players...")
         print(f"Current unsucc players: {unsucc}")
@@ -110,7 +111,32 @@ def test_rs_engine_complete_parity():
         except Exception as e:
             print(f"Retry Error setting player {i} hole cards in Rust engine: {e}")
             unsucc.append(i)
+        if len(unsucc)==2:
+            rerun_count+=1
+            if rerun_count>5:
+                Warning.warn(f"deadlock detected setting player holes, aborting retries, posibly situation like  player 1 has card A, player 2 has card B, and A and B are the same card")
+                break
     
+    # handling deadlock
+    for i in unsucc:
+        pyP = py_state.players[i]
+        print(f"first dealing an undealt card to player {i}")
+        card1 = py_state.undealt.pop(0) 
+        while card1 in [c for p in py_state.players for c in p.hole] or card1 in py_state.board:
+            py_state.undealt.append(card1)
+            card1 = py_state.undealt.pop(0)
+        card2 = py_state.undealt.pop(0)
+        while card2 in [c for p in py_state.players for c in p.hole] or card2 in py_state.board or card2==card1:
+            py_state.undealt.append(card2)
+            card2 = py_state.undealt.pop(0)
+        pyP.hole = (card1, card2)
+        print(f"player {i} assigned cards {card1}, {card2}")
+        try:
+            rs._test_set_player_hole(i, (pyP.hole[0], pyP.hole[1]))
+        except Exception as e:
+            print(f"Error setting player {i} hole cards in rust engine: {e}")
+            unsucc.append(i)
+    assert len(unsucc)==0, f"Failed to set hole cards for players {unsucc} in rust engine"
     rs._test_set_undealt(list(py_state.undealt))
 
     print(f"py state players: {[ (p.stack, p.hole) for p in py_state.players ]}")
@@ -121,7 +147,7 @@ def test_rs_engine_complete_parity():
         assert py_val == rs_val, f"Mismatch in attribute {attr}: py={py_val}, rs={rs_val}"
     assert canonical_state(py_state) == canonical_state(rs_state)
     
-    for _ in range(200):
+    for _ in range(5500):
         li_py = py.legal_actions(py_state)
         li_rs = rs.legal_actions(rs_state)
         assert li_py == li_rs
