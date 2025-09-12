@@ -35,8 +35,6 @@ class GameController(QtCore.QObject):
             TamedRandomAgent(self.rng) for _ in range(self.engine.N)
         ]
         self.agents[hero_seat] = None  # human
-        self.agents[((hero_seat + 1) % self.engine.N)] = CKPTAgent(r"E:\Programming_Projects\nlhe_refactor\checkpoints\20250911_113805\checkpoint_0000043")  # ckpt agent next to act after hero
-
         self.state: GameState = self.engine.reset_hand(button=0)
         self.state_changed.emit(self.state)
 
