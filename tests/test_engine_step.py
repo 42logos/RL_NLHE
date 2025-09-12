@@ -5,18 +5,18 @@ import types
 
 import pytest
 
-# Provide a minimal stub for the optional compiled evaluator so the engine
-# can be imported without the Rust extension being available.
-_stub = types.ModuleType("nlhe_engine")
-_stub.best5_rank_from_7_py = lambda cards: (0, [0])
-sys.modules.setdefault("nlhe_engine", _stub)
+# Only create stub if nlhe_engine is not already available
+if "nlhe_engine" not in sys.modules:
+    try:
+        import nlhe_engine
+    except ImportError:
+        # Provide a minimal stub for the optional compiled evaluator so the engine
+        # can be imported without the Rust extension being available.
+        _stub = types.ModuleType("nlhe_engine")
+        sys.modules.setdefault("nlhe_engine", _stub)
 
 from nlhe.core.engine import NLHEngine
 from nlhe.core.types import Action, ActionType
-
-# Remove stub so other tests that expect the Rust backend to be missing will
-# see an ImportError and skip appropriately.
-sys.modules.pop("nlhe_engine", None)
 
 
 def test_fold_step():

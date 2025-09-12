@@ -1,10 +1,14 @@
 import types
 import sys
 
-# Provide stub for compiled evaluation module used by the engine
-stub = types.ModuleType("nlhe_engine")
-stub.best5_rank_from_7_py = lambda cards: (0, ())
-sys.modules.setdefault("nlhe_engine", stub)
+# Only create stub if nlhe_engine is not already available
+if "nlhe_engine" not in sys.modules:
+    try:
+        import nlhe_engine
+    except ImportError:
+        # Provide stub for compiled evaluation module used by the engine
+        stub = types.ModuleType("nlhe_engine")
+        sys.modules.setdefault("nlhe_engine", stub)
 
 from PyQt6 import QtCore
 

@@ -130,6 +130,20 @@ def build_with_maturin(py: str, crate: Path, module: str, global_install: bool =
     else:
         run([py, "-m", "maturin", "develop", "--release", "-m", str(crate / "Cargo.toml")])
     run([py, "-c", f"import {module},sys;print('{module} imported', {module}.__file__)"])
+    
+    # Post-build fix for nlhe_engine __init__.py issue
+    if module == "nlhe_engine":
+        print(f"Running post-build fix for {module}...")
+        repo_root = Path(__file__).resolve().parent
+        fix_script = repo_root / "fix_nlhe_engine_init.py"
+        if fix_script.exists():
+            try:
+                run([py, str(fix_script)])
+                print(f"✅ Post-build fix completed for {module}")
+            except subprocess.CalledProcessError as e:
+                print(f"⚠️  Post-build fix failed for {module}: {e}")
+        else:
+            print(f"⚠️  Post-build fix script not found: {fix_script}")
 
 
 def build_with_cargo(py: str, crate: Path, module: str) -> None:
@@ -157,6 +171,20 @@ def build_with_cargo(py: str, crate: Path, module: str) -> None:
     shutil.copy2(artifact, dest)
     print(f"installed {dest}")
     run([py, "-c", f"import {module},sys;print('{module} imported', {module}.__file__)"])
+    
+    # Post-build fix for nlhe_engine __init__.py issue
+    if module == "nlhe_engine":
+        print(f"Running post-build fix for {module}...")
+        repo_root = Path(__file__).resolve().parent
+        fix_script = repo_root / "fix_nlhe_engine_init.py"
+        if fix_script.exists():
+            try:
+                run([py, str(fix_script)])
+                print(f"✅ Post-build fix completed for {module}")
+            except subprocess.CalledProcessError as e:
+                print(f"⚠️  Post-build fix failed for {module}: {e}")
+        else:
+            print(f"⚠️  Post-build fix script not found: {fix_script}")
 
 
 def main() -> None:

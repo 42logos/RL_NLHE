@@ -48,7 +48,8 @@ def hand_rank_5(cards5: Tuple[int, int, int, int, int]) -> Tuple[int, Tuple[int,
         - Input: (2, 3, 4, 5, 6)
         - Output: (8, (6,))
     """
-    
+    raise NotImplementedError("No evaluation method available")
+
     ranks = sorted([rank_of(c) for c in cards5], reverse=True)
     suits = [suit_of(c) for c in cards5]
 
@@ -114,7 +115,6 @@ def best5_rank_from_7(cards7: Tuple[int, int, int, int, int, int, int]) -> Tuple
     """
     
     raise NotImplementedError("No evaluation method available")
-    return (-1, ())
 
 try:
     import nlhe_engine as _nlhe  # <- this module now exposes best5_rank_from_7_py
@@ -136,7 +136,8 @@ try:
         return (int(cat), tuple(int(x) for x in tb))
     RUST_EVAL_ACTIVE = True
 except Exception as _e:
-    raise ImportError("Failed to import nlhe_eval") from _e
+    raise ImportError("Failed to import nlhe_eval") 
+
     print("Warning: nlhe_eval import failed, using Python fallback:", _e)
     RUST_EVAL_ACTIVE = False
     def best5_rank_from_7(cards7: Tuple[int, int, int, int, int, int, int]) -> Tuple[int, Tuple[int, ...]]:
