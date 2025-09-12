@@ -10,11 +10,6 @@ import pytest
 from nlhe.core.engine import NLHEngine as PyEngine
 from nlhe.core.state_map import canonical_state
 
-_stub = types.ModuleType("nlhe_engine")
-sys.modules.setdefault("nlhe_engine", _stub)
-# Remove stub so importing the Rust engine will fail and the test will skip.
-sys.modules.pop("nlhe_engine", None)
-
 try:
     from nlhe.core.rs_engine import NLHEngine as RsEngine
     print("✓ Rust engine available for testing")
