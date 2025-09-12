@@ -6,7 +6,7 @@ from typing import List, Optional
 from PyQt6 import QtCore
 
 from ..agents.tamed_random import TamedRandomAgent
-from ..agents.ckpt_agent import CKPTAgent
+# from ..agents.ckpt_agent import CKPTAgent
 from ..core.engine import NLHEngine
 from ..core.types import Action, GameState
 
