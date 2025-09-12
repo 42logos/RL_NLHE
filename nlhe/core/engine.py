@@ -140,21 +140,21 @@ class NLHEngine:
 
         owe = self.owed(s, i)
         acts: List[Action] = []
-        if owe > 0: acts.append(Action(ActionType.FOLD))
-        if owe == 0: acts.append(Action(ActionType.CHECK))
-        if owe > 0: acts.append(Action(ActionType.CALL))
+        if owe > 0: acts.append(Action(ActionType.FOLD)) # facing a bet
+        if owe == 0: acts.append(Action(ActionType.CHECK)) # did not face a bet
+        if owe > 0: acts.append(Action(ActionType.CALL)) # facing a bet
 
         can_raise = (p.status == 'active') and (p.stack > 0)
         if not can_raise:
             return LegalActionInfo(actions=acts)
 
-        if s.current_bet == 0:
+        if s.current_bet == 0: # no bet yet
             min_to = max(s.min_raise, 1)
         else:
-            min_to = s.current_bet + s.min_raise
-        max_to = p.bet + p.stack
-        has_rr = (p.rho < s.tau) or (s.current_bet == 0)
-        if max_to > s.current_bet:
+            min_to = s.current_bet + s.min_raise # facing a bet
+        max_to = p.bet + p.stack # all-in
+        has_rr = (p.rho < s.tau) or (s.current_bet == 0) # tau:= step_idx of last raiser(round update), rho:= step_idx of last action(player)
+        if max_to > s.current_bet: # check if the player allins is not covering the current bet 
             acts.append(Action(ActionType.RAISE_TO))
             return LegalActionInfo(actions=acts, min_raise_to=min_to, max_raise_to=max_to, has_raise_right=has_rr)
         return LegalActionInfo(actions=acts)

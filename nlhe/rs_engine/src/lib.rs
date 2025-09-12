@@ -1194,6 +1194,591 @@ impl NLHEngine {
     fn legal_actions_bits_now(&self) -> PyResult<(u8, Option<i32>, Option<i32>, Option<bool>)> {
         Ok(self.la_cache)
     }
+
+    // ==============================
+    // State setter functions for controlled variable modification
+    // ==============================
+    
+    /// Set the pot value directly. Validates that the new pot value is non-negative.
+    fn set_pot(&mut self, py: Python<'_>, new_pot: i32) -> PyResult<()> {
+        if new_pot < 0 {
+            return Err(PyValueError::new_err("pot cannot be negative"));
+        }
+        
+        let cell = self
+            .cur
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("no state"))?;
+        let mut s_mut = cell.borrow_mut(py);
+        s_mut.pot = new_pot;
+        Ok(())
+    }
+
+    /// Set the current bet value. Validates that it's non-negative.
+    fn set_current_bet(&mut self, py: Python<'_>, new_current_bet: i32) -> PyResult<()> {
+        if new_current_bet < 0 {
+            return Err(PyValueError::new_err("current_bet cannot be negative"));
+        }
+        
+        let cell = self
+            .cur
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("no state"))?;
+        let mut s_mut = cell.borrow_mut(py);
+        s_mut.current_bet = new_current_bet;
+        // Update legal actions cache since current_bet affects available actions
+        self.la_cache = legal_actions_bits_from_state(&s_mut);
+        Ok(())
+    }
+
+    /// Set the minimum raise amount. Validates that it's positive.
+    fn set_min_raise(&mut self, py: Python<'_>, new_min_raise: i32) -> PyResult<()> {
+        if new_min_raise <= 0 {
+            return Err(PyValueError::new_err("min_raise must be positive"));
+        }
+        
+        let cell = self
+            .cur
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("no state"))?;
+        let mut s_mut = cell.borrow_mut(py);
+        s_mut.min_raise = new_min_raise;
+        // Update legal actions cache since min_raise affects available actions
+        self.la_cache = legal_actions_bits_from_state(&s_mut);
+        Ok(())
+    }
+
+    /// Set the tau value (step index for raise rights).
+    fn set_tau(&mut self, py: Python<'_>, new_tau: i64) -> PyResult<()> {
+        let cell = self
+            .cur
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("no state"))?;
+        let mut s_mut = cell.borrow_mut(py);
+        s_mut.tau = new_tau;
+        // Update legal actions cache since tau affects raise rights
+        self.la_cache = legal_actions_bits_from_state(&s_mut);
+        Ok(())
+    }
+
+    /// Set the step index.
+    fn set_step_idx(&mut self, py: Python<'_>, new_step_idx: i64) -> PyResult<()> {
+        let cell = self
+            .cur
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("no state"))?;
+        let mut s_mut = cell.borrow_mut(py);
+        s_mut.step_idx = new_step_idx;
+        Ok(())
+    }
+
+    /// Set a player's stack. Validates that stack is non-negative and updates player status if needed.
+    fn set_player_stack(&mut self, py: Python<'_>, player_idx: usize, new_stack: i32) -> PyResult<()> {
+        if new_stack < 0 {
+            return Err(PyValueError::new_err("stack cannot be negative"));
+        }
+        
+        let cell = self
+            .cur
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("no state"))?;
+        let mut s_mut = cell.borrow_mut(py);
+        
+        if player_idx >= s_mut.players.len() {
+            return Err(PyValueError::new_err("player index out of range"));
+        }
+        
+        s_mut.players[player_idx].stack = new_stack;
+        
+        // Update player status based on new stack
+        if new_stack == 0 && s_mut.players[player_idx].bet > 0 && s_mut.players[player_idx].status != "folded" {
+            s_mut.players[player_idx].status = "allin".to_string();
+        } else if new_stack > 0 && s_mut.players[player_idx].status == "allin" {
+            s_mut.players[player_idx].status = "active".to_string();
+        }
+        
+        // Update legal actions cache since stack changes affect available actions
+        self.la_cache = legal_actions_bits_from_state(&s_mut);
+        Ok(())
+    }
+
+    /// Set a player's bet amount. Validates that bet is non-negative.
+    fn set_player_bet(&mut self, py: Python<'_>, player_idx: usize, new_bet: i32) -> PyResult<()> {
+        if new_bet < 0 {
+            return Err(PyValueError::new_err("bet cannot be negative"));
+        }
+        
+        let cell = self
+            .cur
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("no state"))?;
+        let mut s_mut = cell.borrow_mut(py);
+        
+        if player_idx >= s_mut.players.len() {
+            return Err(PyValueError::new_err("player index out of range"));
+        }
+        
+        s_mut.players[player_idx].bet = new_bet;
+        
+        // Update legal actions cache since bet changes affect available actions
+        self.la_cache = legal_actions_bits_from_state(&s_mut);
+        Ok(())
+    }
+
+    /// Set a player's contribution (total amount put in pot this hand).
+    fn set_player_cont(&mut self, py: Python<'_>, player_idx: usize, new_cont: i32) -> PyResult<()> {
+        if new_cont < 0 {
+            return Err(PyValueError::new_err("cont cannot be negative"));
+        }
+        
+        let cell = self
+            .cur
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("no state"))?;
+        let mut s_mut = cell.borrow_mut(py);
+        
+        if player_idx >= s_mut.players.len() {
+            return Err(PyValueError::new_err("player index out of range"));
+        }
+        
+        s_mut.players[player_idx].cont = new_cont;
+        Ok(())
+    }
+
+    /// Set a player's rho value (step index when player last acted).
+    fn set_player_rho(&mut self, py: Python<'_>, player_idx: usize, new_rho: i64) -> PyResult<()> {
+        let cell = self
+            .cur
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("no state"))?;
+        let mut s_mut = cell.borrow_mut(py);
+        
+        if player_idx >= s_mut.players.len() {
+            return Err(PyValueError::new_err("player index out of range"));
+        }
+        
+        s_mut.players[player_idx].rho = new_rho;
+        
+        // Update legal actions cache since rho affects raise rights and next_to_act
+        self.la_cache = legal_actions_bits_from_state(&s_mut);
+        Ok(())
+    }
+
+    /// Set a player's status. Validates status is one of: "active", "folded", "allin".
+    fn set_player_status(&mut self, py: Python<'_>, player_idx: usize, new_status: String) -> PyResult<()> {
+        if !["active", "folded", "allin"].contains(&new_status.as_str()) {
+            return Err(PyValueError::new_err("status must be 'active', 'folded', or 'allin'"));
+        }
+        
+        let cell = self
+            .cur
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("no state"))?;
+        let mut s_mut = cell.borrow_mut(py);
+        
+        if player_idx >= s_mut.players.len() {
+            return Err(PyValueError::new_err("player index out of range"));
+        }
+        
+        s_mut.players[player_idx].status = new_status;
+        
+        // Update legal actions cache since status changes affect available actions
+        self.la_cache = legal_actions_bits_from_state(&s_mut);
+        Ok(())
+    }
+
+    /// Convenience method to set multiple state variables at once with validation.
+    /// This helps maintain state consistency when multiple related values need to change.
+    fn set_state_batch(&mut self, py: Python<'_>, updates: HashMap<String, i64>) -> PyResult<()> {
+        let cell = self
+            .cur
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("no state"))?;
+        let mut s_mut = cell.borrow_mut(py);
+        
+        // Apply all updates to temporary values first, then validate
+        let mut modified = false;
+        
+        for (key, value) in updates {
+            match key.as_str() {
+                "pot" => {
+                    if value < 0 {
+                        return Err(PyValueError::new_err("pot cannot be negative"));
+                    }
+                    s_mut.pot = value as i32;
+                    modified = true;
+                },
+                "current_bet" => {
+                    if value < 0 {
+                        return Err(PyValueError::new_err("current_bet cannot be negative"));
+                    }
+                    s_mut.current_bet = value as i32;
+                    modified = true;
+                },
+                "min_raise" => {
+                    if value <= 0 {
+                        return Err(PyValueError::new_err("min_raise must be positive"));
+                    }
+                    s_mut.min_raise = value as i32;
+                    modified = true;
+                },
+                "tau" => {
+                    s_mut.tau = value;
+                    modified = true;
+                },
+                "step_idx" => {
+                    s_mut.step_idx = value;
+                    modified = true;
+                },
+                _ => {
+                    let err_msg = format!("unknown state variable: {}", key);
+                    return Err(PyValueError::new_err(err_msg));
+                }
+            }
+        }
+        
+        if modified {
+            // Update legal actions cache if any state that affects it was modified
+            self.la_cache = legal_actions_bits_from_state(&s_mut);
+        }
+        
+        Ok(())
+    }
+
+    /// Validate current state consistency and optionally fix issues.
+    /// Returns warnings about inconsistencies found.
+    fn validate_and_fix_state(&mut self, py: Python<'_>, fix_issues: bool) -> PyResult<Vec<String>> {
+        let cell = self
+            .cur
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("no state"))?;
+        let mut s_mut = cell.borrow_mut(py);
+        let mut warnings = Vec::new();
+        
+        // Check pot consistency
+        let calculated_pot: i32 = s_mut.players.iter().map(|p| p.cont).sum();
+        if s_mut.pot != calculated_pot {
+            warnings.push(format!(
+                "Pot mismatch: pot={}, calculated from contributions={}",
+                s_mut.pot, calculated_pot
+            ));
+            if fix_issues {
+                s_mut.pot = calculated_pot;
+            }
+        }
+        
+        // Check current_bet consistency
+        let max_bet = s_mut.players.iter().map(|p| p.bet).max().unwrap_or(0);
+        if s_mut.current_bet != max_bet {
+            warnings.push(format!(
+                "Current bet mismatch: current_bet={}, max player bet={}",
+                s_mut.current_bet, max_bet
+            ));
+            if fix_issues {
+                s_mut.current_bet = max_bet;
+            }
+        }
+        
+        // Check player status consistency
+        for (idx, player) in s_mut.players.iter_mut().enumerate() {
+            // Player with zero stack and positive bet should be all-in
+            if player.stack == 0 && player.bet > 0 && player.status == "active" {
+                warnings.push(format!(
+                    "Player {} has zero stack but is marked as active",
+                    idx
+                ));
+                if fix_issues {
+                    player.status = "allin".to_string();
+                }
+            }
+            
+            // Player marked as all-in but has stack should be active
+            if player.stack > 0 && player.status == "allin" {
+                warnings.push(format!(
+                    "Player {} has stack but is marked as all-in",
+                    idx
+                ));
+                if fix_issues {
+                    player.status = "active".to_string();
+                }
+            }
+            
+            // Negative values checks
+            if player.stack < 0 {
+                warnings.push(format!(
+                    "Player {} has negative stack: {}",
+                    idx, player.stack
+                ));
+            }
+            if player.bet < 0 {
+                warnings.push(format!(
+                    "Player {} has negative bet: {}",
+                    idx, player.bet
+                ));
+            }
+            if player.cont < 0 {
+                warnings.push(format!(
+                    "Player {} has negative contribution: {}",
+                    idx, player.cont
+                ));
+            }
+        }
+        
+        // Update legal actions cache after any fixes
+        if fix_issues && !warnings.is_empty() {
+            self.la_cache = legal_actions_bits_from_state(&s_mut);
+        }
+        
+        Ok(warnings)
+    }
+
+    /// Set the board cards. Validates that all cards are in range 0-51 and no duplicates exist.
+    /// Also updates the undealt deck to exclude board cards.
+    fn set_board(&mut self, py: Python<'_>, new_board: Vec<u8>) -> PyResult<()> {
+        // Validate card range
+        for &card in &new_board {
+            if card > 51 {
+                return Err(PyValueError::new_err(format!("invalid card value: {}", card)));
+            }
+        }
+        
+        // Check for duplicates in board
+        let mut seen = HashSet::new();
+        for &card in &new_board {
+            if !seen.insert(card) {
+                return Err(PyValueError::new_err(format!("duplicate card in board: {}", card)));
+            }
+        }
+        
+        let cell = self
+            .cur
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("no state"))?;
+        let mut s_mut = cell.borrow_mut(py);
+        
+        // Check for conflicts with existing hole cards
+        for player in &s_mut.players {
+            if let Some((c1, c2)) = player.hole {
+                if new_board.contains(&c1) {
+                    return Err(PyValueError::new_err(format!("board conflicts with player hole card: {}", c1)));
+                }
+                if new_board.contains(&c2) {
+                    return Err(PyValueError::new_err(format!("board conflicts with player hole card: {}", c2)));
+                }
+            }
+        }
+        
+        // Update board
+        s_mut.board = new_board.clone();
+        
+        // Update undealt deck - remove board cards and all hole cards
+        let mut used_cards = HashSet::new();
+        used_cards.extend(&new_board);
+        
+        for player in &s_mut.players {
+            if let Some((c1, c2)) = player.hole {
+                used_cards.insert(c1);
+                used_cards.insert(c2);
+            }
+        }
+        
+        s_mut.undealt = (0u8..52u8)
+            .filter(|card| !used_cards.contains(card))
+            .collect();
+        
+        Ok(())
+    }
+
+    /// Set a player's hole cards. Validates cards are in range, no duplicates, and no conflicts.
+    fn set_player_hole(&mut self, py: Python<'_>, player_idx: usize, hole_cards: Option<(u8, u8)>) -> PyResult<()> {
+        let cell = self
+            .cur
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("no state"))?;
+        let mut s_mut = cell.borrow_mut(py);
+        
+        if player_idx >= s_mut.players.len() {
+            return Err(PyValueError::new_err("player index out of range"));
+        }
+        
+        if let Some((c1, c2)) = hole_cards {
+            // Validate card range
+            if c1 > 51 || c2 > 51 {
+                return Err(PyValueError::new_err("invalid card value (must be 0-51)"));
+            }
+            
+            // Check for duplicate cards in this player's hand
+            if c1 == c2 {
+                return Err(PyValueError::new_err("player cannot have duplicate hole cards"));
+            }
+            
+            // Check for conflicts with board
+            if s_mut.board.contains(&c1) || s_mut.board.contains(&c2) {
+                return Err(PyValueError::new_err("hole card conflicts with board"));
+            }
+            
+            // Check for conflicts with other players' hole cards
+            for (idx, player) in s_mut.players.iter().enumerate() {
+                if idx != player_idx {
+                    if let Some((other_c1, other_c2)) = player.hole {
+                        if c1 == other_c1 || c1 == other_c2 || c2 == other_c1 || c2 == other_c2 {
+                            return Err(PyValueError::new_err(format!("hole card conflicts with player {}", idx)));
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Update player's hole cards
+        s_mut.players[player_idx].hole = hole_cards;
+        
+        // Update undealt deck
+        let mut used_cards = HashSet::new();
+        used_cards.extend(&s_mut.board);
+        
+        for player in &s_mut.players {
+            if let Some((c1, c2)) = player.hole {
+                used_cards.insert(c1);
+                used_cards.insert(c2);
+            }
+        }
+        
+        s_mut.undealt = (0u8..52u8)
+            .filter(|card| !used_cards.contains(card))
+            .collect();
+        
+        Ok(())
+    }
+
+    /// Set the undealt deck directly. Validates that all cards are in range and no duplicates exist.
+    /// This is useful for controlling the exact order of future cards.
+    fn set_undealt(&mut self, py: Python<'_>, new_undealt: Vec<u8>) -> PyResult<()> {
+        // Validate card range
+        for &card in &new_undealt {
+            if card > 51 {
+                return Err(PyValueError::new_err(format!("invalid card value: {}", card)));
+            }
+        }
+        
+        // Check for duplicates in undealt
+        let mut seen = HashSet::new();
+        for &card in &new_undealt {
+            if !seen.insert(card) {
+                return Err(PyValueError::new_err(format!("duplicate card in undealt: {}", card)));
+            }
+        }
+        
+        let cell = self
+            .cur
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("no state"))?;
+        let mut s_mut = cell.borrow_mut(py);
+        
+        // Check for conflicts with board and hole cards
+        let mut used_cards = HashSet::new();
+        used_cards.extend(&s_mut.board);
+        
+        for player in &s_mut.players {
+            if let Some((c1, c2)) = player.hole {
+                used_cards.insert(c1);
+                used_cards.insert(c2);
+            }
+        }
+        
+        for &card in &new_undealt {
+            if used_cards.contains(&card) {
+                return Err(PyValueError::new_err(format!("undealt card {} conflicts with cards in play", card)));
+            }
+        }
+        
+        s_mut.undealt = new_undealt;
+        Ok(())
+    }
+
+    /// Convenience method to set up a complete card scenario with board, hole cards, and remaining deck.
+    /// This ensures all cards are properly distributed with no conflicts.
+    fn set_card_scenario(&mut self, py: Python<'_>, 
+                        board: Vec<u8>, 
+                        hole_cards: Vec<Option<(u8, u8)>>, 
+                        undealt: Option<Vec<u8>>) -> PyResult<()> {
+        let cell = self
+            .cur
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("no state"))?;
+        let mut s_mut = cell.borrow_mut(py);
+        
+        if hole_cards.len() != s_mut.players.len() {
+            return Err(PyValueError::new_err("hole_cards length must match number of players"));
+        }
+        
+        // Collect all cards that will be used
+        let mut used_cards = HashSet::new();
+        
+        // Validate and collect board cards
+        for &card in &board {
+            if card > 51 {
+                return Err(PyValueError::new_err(format!("invalid board card: {}", card)));
+            }
+            if !used_cards.insert(card) {
+                return Err(PyValueError::new_err(format!("duplicate card: {}", card)));
+            }
+        }
+        
+        // Validate and collect hole cards
+        for (idx, hole) in hole_cards.iter().enumerate() {
+            if let Some((c1, c2)) = hole {
+                if *c1 > 51 || *c2 > 51 {
+                    return Err(PyValueError::new_err(format!("invalid hole card for player {}", idx)));
+                }
+                if c1 == c2 {
+                    return Err(PyValueError::new_err(format!("player {} cannot have duplicate hole cards", idx)));
+                }
+                if !used_cards.insert(*c1) {
+                    return Err(PyValueError::new_err(format!("duplicate card: {}", c1)));
+                }
+                if !used_cards.insert(*c2) {
+                    return Err(PyValueError::new_err(format!("duplicate card: {}", c2)));
+                }
+            }
+        }
+        
+        // Handle undealt cards
+        let final_undealt = if let Some(undealt_cards) = undealt {
+            // Validate provided undealt cards
+            for &card in &undealt_cards {
+                if card > 51 {
+                    return Err(PyValueError::new_err(format!("invalid undealt card: {}", card)));
+                }
+                if used_cards.contains(&card) {
+                    return Err(PyValueError::new_err(format!("undealt card {} conflicts with cards in play", card)));
+                }
+            }
+            
+            // Check for duplicates in undealt
+            let mut seen = HashSet::new();
+            for &card in &undealt_cards {
+                if !seen.insert(card) {
+                    return Err(PyValueError::new_err(format!("duplicate card in undealt: {}", card)));
+                }
+            }
+            
+            undealt_cards
+        } else {
+            // Auto-generate remaining undealt cards
+            (0u8..52u8)
+                .filter(|card| !used_cards.contains(card))
+                .collect()
+        };
+        
+        // Apply all changes
+        s_mut.board = board;
+        for (idx, hole) in hole_cards.into_iter().enumerate() {
+            s_mut.players[idx].hole = hole;
+        }
+        s_mut.undealt = final_undealt;
+        
+        Ok(())
+    }
 }
 
 // ---- reset_hand for NLHEngine (mutates self.cur only through return) ----

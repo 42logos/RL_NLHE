@@ -1,6 +1,6 @@
 train_settings:
   algo: PPO
-  epochs: 150
+  epochs: 1350
   batch_size: 2048
   num_mini_batches: 2048
   learning_rate: 3e-4

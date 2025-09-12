@@ -1,11 +1,30 @@
 import pytest
 
 from nlhe.core.engine import NLHEngine
+from nlhe.core.rs_engine import NLHEngine as Rs_nlheEngine
 from nlhe.core.types import Action, ActionType
 
+@pytest.mark.parametrize("engine_class", [NLHEngine, Rs_nlheEngine])
+def test_owing_chips(engine_class):
+    eng = engine_class()
+    s = eng.reset_hand(button=0)
+    i = s.next_to_act
+    p = s.players[i]
+    assert eng.owed(s, i) == eng.bb - p.bet  # big blind to call
+    # Simulate some betting
+    p.bet += 3
+    p.stack -= 3
+    p.cont += 3
+    s.pot += 3
+    s.current_bet = p.bet
+    s.min_raise = 2 * eng.bb
+    i = s.next_to_act
+    p = s.players[i]
+    assert eng.owed(s, i) == s.current_bet - p.bet  # amount to call
 
-def test_owing_chips_can_raise_open_rights():
-    eng = NLHEngine()
+@pytest.mark.parametrize("engine_class", [NLHEngine, Rs_nlheEngine])
+def test_owing_chips_can_raise_open_rights(engine_class):
+    eng = engine_class()
     s = eng.reset_hand(button=0)
     i = s.next_to_act
     p = s.players[i]
@@ -19,13 +38,12 @@ def test_owing_chips_can_raise_open_rights():
     assert info.max_raise_to == p.bet + p.stack
     assert info.has_raise_right is True
 
-
-def test_owing_chips_cannot_raise_short_stack():
-    eng = NLHEngine()
+@pytest.mark.parametrize("engine_class", [NLHEngine, Rs_nlheEngine])
+def test_owing_chips_cannot_raise_short_stack(engine_class):
+    eng = engine_class(start_stack=2)
     s = eng.reset_hand(button=0)
     i = s.next_to_act
     p = s.players[i]
-    p.stack = eng.owed(s, i)  # only enough to call
     info = eng.legal_actions(s)
     assert info.actions == [
         Action(ActionType.FOLD),
