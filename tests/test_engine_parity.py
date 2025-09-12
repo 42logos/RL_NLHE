@@ -4,28 +4,25 @@ import types
 
 import pytest
 
-# Stub out the optional Rust extension so the Python engine can be imported.
-_stub = types.ModuleType("nlhe_engine")
-_stub.best5_rank_from_7_py = lambda cards: (0, [0])
-sys.modules.setdefault("nlhe_engine", _stub)
+
+
 
 from nlhe.core.engine import NLHEngine as PyEngine
 from nlhe.core.state_map import canonical_state
 
-
+_stub = types.ModuleType("nlhe_engine")
+sys.modules.setdefault("nlhe_engine", _stub)
 # Remove stub so importing the Rust engine will fail and the test will skip.
 sys.modules.pop("nlhe_engine", None)
 
-rs_mod = pytest.importorskip("nlhe.core.rs_engine")
 try:
-    import nlhe_engine as _nlhe_mod  # type: ignore
-except Exception:  # pragma: no cover - handled by skip below
-    _nlhe_mod = None  # pragma: no cover
+    from nlhe.core.rs_engine import NLHEngine as RsEngine
+    print("✓ Rust engine available for testing")
+except ImportError as e:
+    print(f"✗ Rust engine not available: {e}")
+    sys.exit(1)
 
-if _nlhe_mod is None or not hasattr(_nlhe_mod, "NLHEngine"):
-    pytest.skip("Rust backend not available", allow_module_level=True)
 
-RsEngine = rs_mod.NLHEngine
 from nlhe.core.types import Action, ActionType
 
 
