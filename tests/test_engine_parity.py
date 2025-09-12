@@ -83,7 +83,7 @@ def test_python_vs_rust_engine_equivalence(seed: int):
         if done_py:
             break
 
-@pytest.mark.parametrize("seed", [0, 1])
+@pytest.mark.parametrize("seed", [i for i in range(23)])
 def test_rs_engine_complete_parity(seed: int):
     """Test that the Rust engine is fully equivalent to the Python engine."""
     rng = random.Random(seed)
