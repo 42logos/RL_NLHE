@@ -5,6 +5,56 @@ use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
+const STATUS_ACTIVE: u8 = 0;
+const STATUS_FOLDED: u8 = 1;
+const STATUS_ALLIN: u8 = 2;
+
+#[inline(always)]
+fn status_to_str(s: u8) -> &'static str {
+    match s {
+        STATUS_FOLDED => "folded",
+        STATUS_ALLIN => "allin",
+        _ => "active",
+    }
+}
+
+#[inline(always)]
+fn str_to_status(v: &str) -> u8 {
+    match v {
+        "folded" => STATUS_FOLDED,
+        "allin" => STATUS_ALLIN,
+        _ => STATUS_ACTIVE,
+    }
+}
+
+const ROUND_PREFLOP: u8 = 0;
+const ROUND_FLOP: u8 = 1;
+const ROUND_TURN: u8 = 2;
+const ROUND_RIVER: u8 = 3;
+const ROUND_SHOWDOWN: u8 = 4;
+
+#[inline(always)]
+fn round_to_str(r: u8) -> &'static str {
+    match r {
+        ROUND_FLOP => "Flop",
+        ROUND_TURN => "Turn",
+        ROUND_RIVER => "River",
+        ROUND_SHOWDOWN => "Showdown",
+        _ => "Preflop",
+    }
+}
+
+#[inline(always)]
+fn str_to_round(s: &str) -> u8 {
+    match s {
+        "Flop" => ROUND_FLOP,
+        "Turn" => ROUND_TURN,
+        "River" => ROUND_RIVER,
+        "Showdown" => ROUND_SHOWDOWN,
+        _ => ROUND_PREFLOP,
+    }
+}
+
 // ==============================
 // Card utilities (0..=51)
 // ==============================
@@ -86,9 +136,7 @@ struct PlayerState {
     bet: i32,
     #[pyo3(get, set)]
     cont: i32,
-    /// "active" | "folded" | "allin"
-    #[pyo3(get, set)]
-    status: String,
+    status: u8,
     #[pyo3(get, set)]
     rho: i64,
 }
@@ -110,9 +158,19 @@ impl PlayerState {
             stack,
             bet,
             cont,
-            status: status.unwrap_or_else(|| "active".into()),
+            status: status.map(|s| str_to_status(&s)).unwrap_or(STATUS_ACTIVE),
             rho: rho.unwrap_or(-1_000_000_000),
         }
+    }
+
+    #[getter]
+    fn status(&self) -> &str {
+        status_to_str(self.status)
+    }
+
+    #[setter]
+    fn set_status(&mut self, v: &str) {
+        self.status = str_to_status(v);
     }
 }
 
@@ -121,8 +179,7 @@ impl PlayerState {
 struct GameState {
     #[pyo3(get, set)]
     button: usize,
-    #[pyo3(get, set)]
-    round_label: String,
+    round: u8,
     #[pyo3(get, set)]
     board: Vec<u8>,
     #[pyo3(get, set)]
@@ -186,7 +243,7 @@ impl GameState {
     ) -> Self {
         Self {
             button,
-            round_label,
+            round: str_to_round(&round_label),
             board,
             undealt,
             players,
@@ -200,6 +257,16 @@ impl GameState {
             bb,
             actions_log: Vec::new(),
         }
+    }
+
+    #[getter]
+    fn round_label(&self) -> &str {
+        round_to_str(self.round)
+    }
+
+    #[setter]
+    fn set_round_label(&mut self, v: &str) {
+        self.round = str_to_round(v);
     }
 }
 
@@ -346,188 +413,186 @@ enum HandCategory {
     StraightFlush = 8,
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct HandRank {
     cat: i32,
-    tiebreak: Vec<i32>,
+    tiebreak: [i32; 5],
+}
+
+impl HandRank {
+    #[inline(always)]
+    fn new(cat: i32, tiebreak: [i32; 5]) -> Self {
+        Self { cat, tiebreak }
+    }
 }
 
 impl Ord for HandRank {
     fn cmp(&self, other: &Self) -> Ordering {
         match self.cat.cmp(&other.cat) {
-            Ordering::Equal => self.tiebreak.cmp(&other.tiebreak),
+            Ordering::Equal => {
+                for (a, b) in self.tiebreak.iter().zip(other.tiebreak.iter()) {
+                    match a.cmp(b) {
+                        Ordering::Equal => continue,
+                        o => return o,
+                    }
+                }
+                Ordering::Equal
+            }
             o => o,
         }
     }
 }
+
 impl PartialOrd for HandRank {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-fn ranks_of(cards5: &[u8]) -> Vec<i32> {
-    let mut v: Vec<i32> = cards5.iter().map(|&c| 2 + (c as i32 % 13)).collect();
-    v.sort_by(|a, b| b.cmp(a));
-    v
-}
-fn suits_of(cards5: &[u8]) -> Vec<i32> {
-    cards5.iter().map(|&c| (c / 13) as i32).collect()
-}
-
-fn straight_high(mut uniq: Vec<i32>) -> Option<i32> {
-    uniq.sort_by(|a, b| b.cmp(a));
-    let set: HashSet<i32> = uniq.iter().cloned().collect();
-    if [14, 5, 4, 3, 2].iter().all(|x| set.contains(x)) {
-        return Some(5);
-    }
-    if uniq.len() < 5 {
-        return None;
-    }
-    for i in 0..=uniq.len() - 5 {
-        let w = &uniq[i..i + 5];
-        let diff = w[0] - w[4];
-        let mut h = HashSet::new();
-        let all_distinct = w.iter().all(|x| h.insert(*x));
-        if diff == 4 && all_distinct {
-            return Some(w[0]);
-        }
-    }
-    None
-}
-
+#[inline(always)]
 fn hand_rank_5(cards5: &[u8; 5]) -> HandRank {
-    let ranks = ranks_of(cards5);
-    let suits = suits_of(cards5);
-
-    let mut cnt: HashMap<i32, i32> = HashMap::new();
-    for r in &ranks {
-        *cnt.entry(*r).or_insert(0) += 1;
+    let mut ranks = [0i32; 5];
+    let mut suits = [0u8; 5];
+    for (i, &c) in cards5.iter().enumerate() {
+        ranks[i] = 2 + (c as i32 % 13);
+        suits[i] = c / 13;
     }
-    let mut bycnt: Vec<(i32, i32)> = cnt.into_iter().collect();
-    bycnt.sort_by(|a, b| (b.1, b.0).cmp(&(a.1, a.0)));
+    ranks.sort_unstable_by(|a, b| b.cmp(a));
+    let is_flush = suits.iter().all(|&s| s == suits[0]);
 
-    let is_flush = {
-        let mut s = HashSet::new();
-        for v in suits {
-            s.insert(v);
+    let mut cnt = [0u8; 15];
+    for &r in &ranks {
+        cnt[r as usize] += 1;
+    }
+
+    let mut pairs = [0i32; 2];
+    let mut pair_count = 0;
+    let mut trips = 0i32;
+    let mut has_trips = false;
+    let mut quad = 0i32;
+    let mut has_quad = false;
+    for r in (2..=14).rev() {
+        match cnt[r] {
+            4 => {
+                quad = r as i32;
+                has_quad = true;
+            }
+            3 => {
+                trips = r as i32;
+                has_trips = true;
+            }
+            2 => {
+                if pair_count < 2 {
+                    pairs[pair_count] = r as i32;
+                }
+                pair_count += 1;
+            }
+            _ => {}
         }
-        s.len() == 1
-    };
-    let mut uniq: Vec<i32> = ranks.clone();
-    uniq.dedup();
-
-    let s_high = straight_high(uniq.clone());
-
-    if is_flush && s_high.is_some() {
-        return HandRank {
-            cat: HandCategory::StraightFlush as i32,
-            tiebreak: vec![s_high.unwrap()],
-        };
     }
-    if bycnt[0].1 == 4 {
-        let quad = bycnt[0].0;
-        let kicker = ranks.iter().cloned().filter(|r| *r != quad).max().unwrap();
-        return HandRank {
-            cat: HandCategory::Four as i32,
-            tiebreak: vec![quad, kicker],
-        };
+
+    let mut mask: u16 = 0;
+    for &r in &ranks {
+        mask |= 1 << r;
     }
-    if bycnt[0].1 == 3 && bycnt[1].1 == 2 {
-        let trips = bycnt[0].0;
-        let pair = bycnt[1].0;
-        return HandRank {
-            cat: HandCategory::FullHouse as i32,
-            tiebreak: vec![trips, pair],
-        };
+    let mut s_high = 0i32;
+    let mut has_straight = false;
+    if (mask & ((1 << 14) | (1 << 5) | (1 << 4) | (1 << 3) | (1 << 2)))
+        == ((1 << 14) | (1 << 5) | (1 << 4) | (1 << 3) | (1 << 2))
+    {
+        s_high = 5;
+        has_straight = true;
+    } else {
+        for h in (5..=14).rev() {
+            let pat = 0b1_1111 << (h - 4);
+            if mask & pat == pat {
+                s_high = h as i32;
+                has_straight = true;
+                break;
+            }
+        }
+    }
+
+    if is_flush && has_straight {
+        return HandRank::new(HandCategory::StraightFlush as i32, [s_high, 0, 0, 0, 0]);
+    }
+    if has_quad {
+        let kicker = ranks.iter().find(|&&r| r != quad).cloned().unwrap();
+        return HandRank::new(HandCategory::Four as i32, [quad, kicker, 0, 0, 0]);
+    }
+    if has_trips && pair_count > 0 {
+        return HandRank::new(HandCategory::FullHouse as i32, [trips, pairs[0], 0, 0, 0]);
     }
     if is_flush {
-        return HandRank {
-            cat: HandCategory::Flush as i32,
-            tiebreak: ranks.clone(),
-        };
+        return HandRank::new(HandCategory::Flush as i32, ranks);
     }
-    if let Some(h) = s_high {
-        return HandRank {
-            cat: HandCategory::Straight as i32,
-            tiebreak: vec![h],
-        };
+    if has_straight {
+        return HandRank::new(HandCategory::Straight as i32, [s_high, 0, 0, 0, 0]);
     }
-    if bycnt[0].1 == 3 {
-        let trips = bycnt[0].0;
-        let kickers: Vec<i32> = ranks
-            .iter()
-            .cloned()
-            .filter(|r| *r != trips)
-            .take(2)
-            .collect();
-        return HandRank {
-            cat: HandCategory::Trips as i32,
-            tiebreak: [vec![trips], kickers].concat(),
-        };
+    if has_trips {
+        let mut tb = [trips, 0, 0, 0, 0];
+        let mut idx = 1;
+        for &r in &ranks {
+            if r != trips {
+                tb[idx] = r;
+                idx += 1;
+            }
+        }
+        return HandRank::new(HandCategory::Trips as i32, tb);
     }
-    if bycnt[0].1 == 2 && bycnt[1].1 == 2 {
-        let hp = bycnt[0].0.max(bycnt[1].0);
-        let lp = bycnt[0].0.min(bycnt[1].0);
+    if pair_count >= 2 {
+        let p1 = pairs[0];
+        let p2 = pairs[1];
         let kicker = ranks
             .iter()
+            .find(|&&r| r != p1 && r != p2)
             .cloned()
-            .filter(|r| *r != hp && *r != lp)
-            .max()
             .unwrap();
-        return HandRank {
-            cat: HandCategory::TwoPair as i32,
-            tiebreak: vec![hp, lp, kicker],
-        };
+        return HandRank::new(HandCategory::TwoPair as i32, [p1, p2, kicker, 0, 0]);
     }
-    if bycnt[0].1 == 2 {
-        let pair = bycnt[0].0;
-        let kickers: Vec<i32> = ranks
-            .iter()
-            .cloned()
-            .filter(|r| *r != pair)
-            .take(3)
-            .collect();
-        return HandRank {
-            cat: HandCategory::OnePair as i32,
-            tiebreak: [vec![pair], kickers].concat(),
-        };
+    if pair_count == 1 {
+        let pair = pairs[0];
+        let mut tb = [pair, 0, 0, 0, 0];
+        let mut idx = 1;
+        for &r in &ranks {
+            if r != pair {
+                tb[idx] = r;
+                idx += 1;
+            }
+        }
+        return HandRank::new(HandCategory::OnePair as i32, tb);
     }
-    HandRank {
-        cat: HandCategory::High as i32,
-        tiebreak: ranks,
-    }
+    HandRank::new(HandCategory::High as i32, ranks)
 }
 
-fn best5_rank_from_7_rust(cards7: &[u8; 7]) -> (i32, Vec<i32>) {
-    let idxs = [
-        [0, 1, 2, 3, 4],
-        [0, 1, 2, 3, 5],
-        [0, 1, 2, 3, 6],
-        [0, 1, 2, 4, 5],
-        [0, 1, 2, 4, 6],
-        [0, 1, 2, 5, 6],
-        [0, 1, 3, 4, 5],
-        [0, 1, 3, 4, 6],
-        [0, 1, 3, 5, 6],
-        [0, 1, 4, 5, 6],
-        [0, 2, 3, 4, 5],
-        [0, 2, 3, 4, 6],
-        [0, 2, 3, 5, 6],
-        [0, 2, 4, 5, 6],
-        [0, 3, 4, 5, 6],
-        [1, 2, 3, 4, 5],
-        [1, 2, 3, 4, 6],
-        [1, 2, 3, 5, 6],
-        [1, 2, 4, 5, 6],
-        [1, 3, 4, 5, 6],
-        [2, 3, 4, 5, 6],
-    ];
-    let mut best = HandRank {
-        cat: -1,
-        tiebreak: vec![],
-    };
-    for comb in idxs {
+const COMB_IDX: [[usize; 5]; 21] = [
+    [0, 1, 2, 3, 4],
+    [0, 1, 2, 3, 5],
+    [0, 1, 2, 3, 6],
+    [0, 1, 2, 4, 5],
+    [0, 1, 2, 4, 6],
+    [0, 1, 2, 5, 6],
+    [0, 1, 3, 4, 5],
+    [0, 1, 3, 4, 6],
+    [0, 1, 3, 5, 6],
+    [0, 1, 4, 5, 6],
+    [0, 2, 3, 4, 5],
+    [0, 2, 3, 4, 6],
+    [0, 2, 3, 5, 6],
+    [0, 2, 4, 5, 6],
+    [0, 3, 4, 5, 6],
+    [1, 2, 3, 4, 5],
+    [1, 2, 3, 4, 6],
+    [1, 2, 3, 5, 6],
+    [1, 2, 4, 5, 6],
+    [1, 3, 4, 5, 6],
+    [2, 3, 4, 5, 6],
+];
+
+#[inline(always)]
+fn best5_rank_from_7(cards7: &[u8; 7]) -> HandRank {
+    let mut best = HandRank::new(-1, [0; 5]);
+    for comb in COMB_IDX {
         let hand = [
             cards7[comb[0]],
             cards7[comb[1]],
@@ -540,7 +605,7 @@ fn best5_rank_from_7_rust(cards7: &[u8; 7]) -> (i32, Vec<i32>) {
             best = r;
         }
     }
-    (best.cat, best.tiebreak)
+    best
 }
 
 /// Python-friendly entry (parity with your eval.py)
@@ -551,34 +616,39 @@ fn best5_rank_from_7_py(cards7: Vec<u8>) -> PyResult<(i32, Vec<i32>)> {
     }
     let mut a = [0u8; 7];
     a.copy_from_slice(&cards7);
-    Ok(best5_rank_from_7_rust(&a))
+    let r = best5_rank_from_7(&a);
+    Ok((r.cat, r.tiebreak.to_vec()))
 }
 
 // ==============================
 // Pure helpers (no &self) to avoid borrow conflicts
 // ==============================
+#[inline(always)]
 fn one_survivor(s: &GameState) -> Option<usize> {
-    let alive: Vec<usize> = s
-        .players
-        .iter()
-        .enumerate()
-        .filter(|(_, p)| p.status != "folded")
-        .map(|(i, _)| i)
-        .collect();
-    if alive.len() == 1 {
-        Some(alive[0])
-    } else {
-        None
+    let mut survivor = None;
+    for (i, p) in s.players.iter().enumerate() {
+        if p.status != STATUS_FOLDED {
+            if survivor.is_some() {
+                return None;
+            }
+            survivor = Some(i);
+        }
     }
+    survivor
 }
+#[inline(always)]
 fn everyone_allin_or_folded(s: &GameState) -> bool {
-    s.players
-        .iter()
-        .all(|p| p.status != "active" || p.stack == 0)
+    for p in &s.players {
+        if p.status == STATUS_ACTIVE && p.stack > 0 {
+            return false;
+        }
+    }
+    true
 }
+#[inline(always)]
 fn round_open(s: &GameState) -> bool {
     for p in s.players.iter() {
-        if p.status == "active" {
+        if p.status == STATUS_ACTIVE {
             let owe = (s.current_bet - p.bet).max(0);
             if p.rho < s.tau || owe > 0 {
                 return true;
@@ -588,8 +658,8 @@ fn round_open(s: &GameState) -> bool {
     false
 }
 fn deal_next_street(s: &mut GameState) -> PyResult<()> {
-    match s.round_label.as_str() {
-        "Preflop" => {
+    match s.round {
+        ROUND_PREFLOP => {
             for _ in 0..3 {
                 let c = s
                     .undealt
@@ -597,23 +667,23 @@ fn deal_next_street(s: &mut GameState) -> PyResult<()> {
                     .ok_or_else(|| PyValueError::new_err("deck underflow"))?;
                 s.board.push(c);
             }
-            s.round_label = "Flop".into();
+            s.round = ROUND_FLOP;
         }
-        "Flop" => {
+        ROUND_FLOP => {
             let c = s
                 .undealt
                 .pop()
                 .ok_or_else(|| PyValueError::new_err("deck underflow"))?;
             s.board.push(c);
-            s.round_label = "Turn".into();
+            s.round = ROUND_TURN;
         }
-        "Turn" => {
+        ROUND_TURN => {
             let c = s
                 .undealt
                 .pop()
                 .ok_or_else(|| PyValueError::new_err("deck underflow"))?;
             s.board.push(c);
-            s.round_label = "River".into();
+            s.round = ROUND_RIVER;
         }
         _ => return Err(PyValueError::new_err("No further streets to deal")),
     }
@@ -622,11 +692,11 @@ fn deal_next_street(s: &mut GameState) -> PyResult<()> {
 fn reset_round(n: usize, s: &mut GameState) -> u64 {
     let mut changed: u64 = 0;
     for (idx, p) in s.players.iter_mut().enumerate() {
-        if p.bet != 0 || (p.status == "active" && p.rho != -1_000_000_000) {
+        if p.bet != 0 || (p.status == STATUS_ACTIVE && p.rho != -1_000_000_000) {
             changed |= 1 << idx;
         }
         p.bet = 0;
-        if p.status == "active" {
+        if p.status == STATUS_ACTIVE {
             p.rho = -1_000_000_000;
         }
     }
@@ -635,7 +705,7 @@ fn reset_round(n: usize, s: &mut GameState) -> u64 {
     s.tau = 0;
     let mut x = (s.button + 1) % n;
     for _ in 0..n {
-        if s.players[x].status == "active" {
+        if s.players[x].status == STATUS_ACTIVE {
             s.next_to_act = Some(x);
             return changed;
         }
@@ -644,29 +714,74 @@ fn reset_round(n: usize, s: &mut GameState) -> u64 {
     s.next_to_act = None;
     changed
 }
+
+#[inline(always)]
+fn advance_next_player(n: usize, s: &mut GameState, i: usize) {
+    let mut j = (i + 1) % n;
+    for _ in 0..n {
+        let pj = &s.players[j];
+        if pj.status == STATUS_ACTIVE {
+            let owej = (s.current_bet - pj.bet).max(0);
+            if pj.rho < s.tau || owej > 0 {
+                s.next_to_act = Some(j);
+                return;
+            }
+        }
+        j = (j + 1) % n;
+    }
+    s.next_to_act = None;
+}
+
+#[inline(always)]
+fn add_chips(s: &mut GameState, idx: usize, amount: i32) -> PyResult<()> {
+    if amount < 0 {
+        return Err(PyValueError::new_err("negative amount"));
+    }
+    if s.players[idx].stack < amount {
+        return Err(PyValueError::new_err("insufficient stack"));
+    }
+    s.players[idx].stack -= amount;
+    s.players[idx].bet += amount;
+    s.players[idx].cont += amount;
+    s.pot += amount;
+    Ok(())
+}
+
 fn settle_showdown(n: usize, s: &GameState) -> PyResult<Vec<i32>> {
-    let a: Vec<usize> = s
-        .players
-        .iter()
-        .enumerate()
-        .filter(|(_, p)| p.status != "folded")
-        .map(|(i, _)| i)
-        .collect();
-    let mut levels: Vec<i32> = s
-        .players
-        .iter()
-        .map(|p| p.cont)
-        .filter(|v| *v > 0)
-        .collect();
-    levels.sort();
-    levels.dedup();
-    if levels.is_empty() {
+    let mut active = [0usize; 6];
+    let mut ac = 0;
+    for (i, p) in s.players.iter().enumerate() {
+        if p.status != STATUS_FOLDED {
+            active[ac] = i;
+            ac += 1;
+        }
+    }
+    let mut levels = [0i32; 6];
+    let mut lc = 0;
+    for p in s.players.iter() {
+        if p.cont > 0 {
+            let mut found = false;
+            for j in 0..lc {
+                if levels[j] == p.cont {
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                levels[lc] = p.cont;
+                lc += 1;
+            }
+        }
+    }
+    if lc == 0 {
         return Ok(vec![0; n]);
     }
+    levels[..lc].sort_unstable();
 
-    let mut ranks: HashMap<usize, (i32, Vec<i32>)> = HashMap::new();
-    for i in &a {
-        let hole = s.players[*i]
+    let mut ranks = [HandRank::new(-1, [0; 5]); 6];
+    for ai in 0..ac {
+        let i = active[ai];
+        let hole = s.players[i]
             .hole
             .ok_or_else(|| PyValueError::new_err("missing hole cards"))?;
         let mut seven = [0u8; 7];
@@ -675,49 +790,64 @@ fn settle_showdown(n: usize, s: &GameState) -> PyResult<Vec<i32>> {
         for (k, c) in s.board.iter().enumerate() {
             seven[2 + k] = *c;
         }
-        let (cat, tb) = best5_rank_from_7_rust(&seven);
-        ranks.insert(*i, (cat, tb));
+        ranks[i] = best5_rank_from_7(&seven);
     }
 
-    let mut rewards = vec![0i32; n];
+    let mut rewards = [0i32; 6];
     let mut y_prev = 0i32;
     let mut carry = 0i32;
-    let mut last_nonempty_winners: Option<Vec<usize>> = None;
+    let mut last_winners = [0usize; 6];
+    let mut last_wc = 0usize;
 
-    for y in levels {
-        let contributors_count = s.players.iter().filter(|p| p.cont >= y).count() as i32;
+    for li in 0..lc {
+        let y = levels[li];
+        let mut contributors_count = 0i32;
+        for p in s.players.iter() {
+            if p.cont >= y {
+                contributors_count += 1;
+            }
+        }
         let pk = contributors_count * (y - y_prev) + carry;
-        let elig: Vec<usize> = a
-            .iter()
-            .cloned()
-            .filter(|i| s.players[*i].cont >= y)
-            .collect();
-
-        if !elig.is_empty() {
-            let best_val = elig
-                .iter()
-                .map(|i| ranks.get(i).unwrap())
-                .max_by(|x, y| match x.0.cmp(&y.0) {
-                    Ordering::Equal => x.1.cmp(&y.1),
-                    o => o,
-                })
-                .unwrap()
-                .clone();
-
-            let winners: Vec<usize> = elig.into_iter().filter(|i| ranks[i] == best_val).collect();
-            last_nonempty_winners = Some(winners.clone());
-            let share = pk / winners.len() as i32;
-            let rem = pk % winners.len() as i32;
-            for w in &winners {
-                rewards[*w] += share;
+        let mut elig = [0usize; 6];
+        let mut ec = 0usize;
+        for ai in 0..ac {
+            let i = active[ai];
+            if s.players[i].cont >= y {
+                elig[ec] = i;
+                ec += 1;
+            }
+        }
+        if ec > 0 {
+            let mut best_rank = HandRank::new(-1, [0; 5]);
+            for j in 0..ec {
+                let idx = elig[j];
+                if ranks[idx] > best_rank {
+                    best_rank = ranks[idx];
+                }
+            }
+            let mut winners = [0usize; 6];
+            let mut wc = 0usize;
+            for j in 0..ec {
+                let idx = elig[j];
+                if ranks[idx] == best_rank {
+                    winners[wc] = idx;
+                    wc += 1;
+                }
+            }
+            last_wc = wc;
+            last_winners[..wc].copy_from_slice(&winners[..wc]);
+            let share = pk / wc as i32;
+            let rem = pk % wc as i32;
+            for j in 0..wc {
+                rewards[winners[j]] += share;
             }
             if rem > 0 {
                 let start = (s.button + 1) % n;
-                let mut ordered = winners.clone();
-                ordered.sort_by_key(|j| ((*j + n) - start) % n);
-                let len = ordered.len();
+                let mut ordered = [0usize; 6];
+                ordered[..wc].copy_from_slice(&winners[..wc]);
+                ordered[..wc].sort_by_key(|j| ((*j + n) - start) % n);
                 for k in 0..rem as usize {
-                    rewards[ordered[k % len]] += 1;
+                    rewards[ordered[k % wc]] += 1;
                 }
             }
             carry = 0;
@@ -727,27 +857,24 @@ fn settle_showdown(n: usize, s: &GameState) -> PyResult<Vec<i32>> {
         y_prev = y;
     }
 
-    if carry > 0 {
-        if let Some(winners) = last_nonempty_winners {
-            let share = carry / winners.len() as i32;
-            let rem = carry % winners.len() as i32;
-            for w in &winners {
-                rewards[*w] += share;
-            }
-            if rem > 0 {
-                let start = (s.button + 1) % n;
-                let mut ordered = winners.clone();
-                ordered.sort_by_key(|j| ((*j + n) - start) % n);
-                let len = ordered.len();
-                for k in 0..rem as usize {
-                    rewards[ordered[k % len]] += 1;
-                }
+    if carry > 0 && last_wc > 0 {
+        let share = carry / last_wc as i32;
+        let rem = carry % last_wc as i32;
+        for j in 0..last_wc {
+            rewards[last_winners[j]] += share;
+        }
+        if rem > 0 {
+            let start = (s.button + 1) % n;
+            let mut ordered = [0usize; 6];
+            ordered[..last_wc].copy_from_slice(&last_winners[..last_wc]);
+            ordered[..last_wc].sort_by_key(|j| ((*j + n) - start) % n);
+            for k in 0..rem as usize {
+                rewards[ordered[k % last_wc]] += 1;
             }
         }
     }
 
-    // Convert to net winnings
-    let mut rl: Vec<i32> = Vec::with_capacity(n);
+    let mut rl = Vec::with_capacity(n);
     for i in 0..n {
         rl.push(rewards[i] - s.players[i].cont);
     }
@@ -759,7 +886,7 @@ fn legal_actions_from(s: &GameState) -> PyResult<LegalActionInfo> {
         None => return Ok(LegalActionInfo::new(vec![], None, None, None)),
     };
     let p = &s.players[i];
-    if p.status != "active" {
+    if p.status != STATUS_ACTIVE {
         return Ok(LegalActionInfo::new(vec![], None, None, None));
     }
 
@@ -784,7 +911,7 @@ fn legal_actions_from(s: &GameState) -> PyResult<LegalActionInfo> {
         }); // CALL
     }
 
-    let can_raise = (p.status == "active") && (p.stack > 0);
+    let can_raise = (p.status == STATUS_ACTIVE) && (p.stack > 0);
     if !can_raise {
         return Ok(LegalActionInfo::new(acts, None, None, None));
     }
@@ -811,13 +938,14 @@ fn legal_actions_from(s: &GameState) -> PyResult<LegalActionInfo> {
     Ok(LegalActionInfo::new(acts, None, None, None))
 }
 
+#[inline(always)]
 fn legal_actions_bits_from_state(s: &GameState) -> (u8, Option<i32>, Option<i32>, Option<bool>) {
     let i = match s.next_to_act {
         Some(x) => x,
         None => return (0, None, None, None),
     };
     let p = &s.players[i];
-    if p.status != "active" {
+    if p.status != STATUS_ACTIVE {
         return (0, None, None, None);
     }
 
@@ -833,7 +961,7 @@ fn legal_actions_bits_from_state(s: &GameState) -> (u8, Option<i32>, Option<i32>
         mask |= 4;
     } // CALL
 
-    let can_raise = (p.status == "active") && (p.stack > 0);
+    let can_raise = (p.status == STATUS_ACTIVE) && (p.stack > 0);
     if !can_raise {
         return (mask, None, None, None);
     }
@@ -866,35 +994,35 @@ fn advance_round_if_needed_internal(
     }
 
     if !round_open(s) {
-        if (s.round_label == "Preflop" || s.round_label == "Flop" || s.round_label == "Turn")
+        if (s.round == ROUND_PREFLOP || s.round == ROUND_FLOP || s.round == ROUND_TURN)
             && everyone_allin_or_folded(s)
         {
-            while s.round_label != "River" {
+            while s.round != ROUND_RIVER {
                 deal_next_street(s)?;
             }
-            s.round_label = "Showdown".into();
+            s.round = ROUND_SHOWDOWN;
             let rewards = settle_showdown(n, s)?;
             return Ok((true, Some(rewards), 0));
         }
 
-        match s.round_label.as_str() {
-            "Preflop" => {
+        match s.round {
+            ROUND_PREFLOP => {
                 deal_next_street(s)?;
                 let reset_mask = reset_round(n, s);
                 return Ok((false, None, reset_mask));
             }
-            "Flop" => {
+            ROUND_FLOP => {
                 deal_next_street(s)?;
                 let reset_mask = reset_round(n, s);
                 return Ok((false, None, reset_mask));
             }
-            "Turn" => {
+            ROUND_TURN => {
                 deal_next_street(s)?;
                 let reset_mask = reset_round(n, s);
                 return Ok((false, None, reset_mask));
             }
-            "River" => {
-                s.round_label = "Showdown".into();
+            ROUND_RIVER => {
+                s.round = ROUND_SHOWDOWN;
                 let rewards = settle_showdown(n, s)?;
                 return Ok((true, Some(rewards), 0));
             }
@@ -914,6 +1042,7 @@ struct NLHEngine {
     bb: i32,
     start_stack: i32,
     rng: StdRng,
+    deck: [u8; 52],
     cur: Option<Py<GameState>>,
     la_cache: (u8, Option<i32>, Option<i32>, Option<bool>),
 }
@@ -936,23 +1065,32 @@ impl NLHEngine {
             Some(s) => StdRng::seed_from_u64(s),
             None => StdRng::from_entropy(),
         };
+        let mut deck = [0u8; 52];
+        let mut i = 0u8;
+        while i < 52 {
+            deck[i as usize] = i;
+            i += 1;
+        }
         Ok(Self {
             n: num_players,
             sb,
             bb,
             start_stack,
             rng,
+            deck,
             cur: None,
             la_cache: (0, None, None, None),
         })
     }
 
     #[getter]
+    #[inline(always)]
     fn N(&self) -> usize {
         self.n
     }
 
     /// Reset internal state and return a one-time full snapshot (Python builds its mirror from this)
+    #[inline(always)]
     fn reset_hand(&mut self, py: Python<'_>, button: usize) -> PyResult<Py<GameState>> {
         let s = self.reset_hand_internal(button)?;
         let la = legal_actions_bits_from_state(&s);
@@ -964,6 +1102,7 @@ impl NLHEngine {
 
     /// Reset internal state and update the provided Python GameState mirror in-place.
     /// Returns None (mirror already updated).
+    #[inline(always)]
     fn reset_hand_apply_py<'py>(
         &mut self,
         py: Python<'py>,
@@ -1013,7 +1152,7 @@ impl NLHEngine {
             .ok_or_else(|| PyValueError::new_err("no state"))?;
         let (board_len_before, round_before) = {
             let s = cell.borrow(py);
-            (s.board.len(), s.round_label.clone())
+            (s.board.len(), s.round)
         };
 
         // Mutate
@@ -1030,8 +1169,8 @@ impl NLHEngine {
         if s2.board.len() > board_len_before {
             board_drawn.extend_from_slice(&s2.board[board_len_before..]);
         }
-        let round_label_change = if s2.round_label != round_before {
-            Some(s2.round_label.clone())
+        let round_label_change = if s2.round != round_before {
+            Some(round_to_str(s2.round).to_string())
         } else {
             None
         };
@@ -1049,7 +1188,7 @@ impl NLHEngine {
                 bet: p_new.bet,
                 cont: p_new.cont,
                 rho: p_new.rho,
-                status: Some(p_new.status.clone()),
+                status: Some(status_to_str(p_new.status).to_string()),
             });
         }
 
@@ -1092,7 +1231,7 @@ impl NLHEngine {
             .ok_or_else(|| PyValueError::new_err("no state"))?;
         let (board_len_before, round_before) = {
             let s = cell.borrow(py);
-            (s.board.len(), s.round_label.clone())
+            (s.board.len(), s.round)
         };
 
         // Mutate
@@ -1109,8 +1248,8 @@ impl NLHEngine {
         if s2.board.len() > board_len_before {
             board_drawn.extend_from_slice(&s2.board[board_len_before..]);
         }
-        let round_label_change = if s2.round_label != round_before {
-            Some(s2.round_label.clone())
+        let round_label_change = if s2.round != round_before {
+            Some(round_to_str(s2.round).to_string())
         } else {
             None
         };
@@ -1130,7 +1269,7 @@ impl NLHEngine {
                     bet: p_new.bet,
                     cont: p_new.cont,
                     rho: p_new.rho,
-                    status: Some(p_new.status.clone()),
+                    status: Some(status_to_str(p_new.status).to_string()),
                 });
             }
         }
@@ -1154,6 +1293,7 @@ impl NLHEngine {
 
     /// Same as step_apply_py but avoids creating/converting a Python Action object.
     /// kind: 0=FOLD,1=CHECK,2=CALL,3=RAISE_TO ; amount: None unless kind==3
+    #[inline(always)]
     fn step_apply_py_raw<'py>(
         &mut self,
         py: Python<'py>,
@@ -1174,6 +1314,7 @@ impl NLHEngine {
     }
 
     /// Fast path: advance round if needed, and update Python GameState mirror in-place.
+    #[inline(always)]
     fn advance_round_if_needed_apply_py<'py>(
         &mut self,
         py: Python<'py>,
@@ -1191,6 +1332,7 @@ impl NLHEngine {
 
     /// Fast legal-actions: return (mask, min_to, max_to, has_rr)
     /// mask bits: 1=FOLD, 2=CHECK, 4=CALL, 8=RAISE_TO
+    #[inline(always)]
     fn legal_actions_bits_now(&self) -> PyResult<(u8, Option<i32>, Option<i32>, Option<bool>)> {
         Ok(self.la_cache)
     }
@@ -1198,13 +1340,13 @@ impl NLHEngine {
     // ==============================
     // State setter functions for controlled variable modification
     // ==============================
-    
+
     /// Set the pot value directly. Validates that the new pot value is non-negative.
     fn set_pot(&mut self, py: Python<'_>, new_pot: i32) -> PyResult<()> {
         if new_pot < 0 {
             return Err(PyValueError::new_err("pot cannot be negative"));
         }
-        
+
         let cell = self
             .cur
             .as_ref()
@@ -1219,7 +1361,7 @@ impl NLHEngine {
         if new_current_bet < 0 {
             return Err(PyValueError::new_err("current_bet cannot be negative"));
         }
-        
+
         let cell = self
             .cur
             .as_ref()
@@ -1236,7 +1378,7 @@ impl NLHEngine {
         if new_min_raise <= 0 {
             return Err(PyValueError::new_err("min_raise must be positive"));
         }
-        
+
         let cell = self
             .cur
             .as_ref()
@@ -1273,30 +1415,38 @@ impl NLHEngine {
     }
 
     /// Set a player's stack. Validates that stack is non-negative and updates player status if needed.
-    fn set_player_stack(&mut self, py: Python<'_>, player_idx: usize, new_stack: i32) -> PyResult<()> {
+    fn set_player_stack(
+        &mut self,
+        py: Python<'_>,
+        player_idx: usize,
+        new_stack: i32,
+    ) -> PyResult<()> {
         if new_stack < 0 {
             return Err(PyValueError::new_err("stack cannot be negative"));
         }
-        
+
         let cell = self
             .cur
             .as_ref()
             .ok_or_else(|| PyValueError::new_err("no state"))?;
         let mut s_mut = cell.borrow_mut(py);
-        
+
         if player_idx >= s_mut.players.len() {
             return Err(PyValueError::new_err("player index out of range"));
         }
-        
+
         s_mut.players[player_idx].stack = new_stack;
-        
+
         // Update player status based on new stack
-        if new_stack == 0 && s_mut.players[player_idx].bet > 0 && s_mut.players[player_idx].status != "folded" {
-            s_mut.players[player_idx].status = "allin".to_string();
-        } else if new_stack > 0 && s_mut.players[player_idx].status == "allin" {
-            s_mut.players[player_idx].status = "active".to_string();
+        if new_stack == 0
+            && s_mut.players[player_idx].bet > 0
+            && s_mut.players[player_idx].status != STATUS_FOLDED
+        {
+            s_mut.players[player_idx].status = STATUS_ALLIN;
+        } else if new_stack > 0 && s_mut.players[player_idx].status == STATUS_ALLIN {
+            s_mut.players[player_idx].status = STATUS_ACTIVE;
         }
-        
+
         // Update legal actions cache since stack changes affect available actions
         self.la_cache = legal_actions_bits_from_state(&s_mut);
         Ok(())
@@ -1307,40 +1457,45 @@ impl NLHEngine {
         if new_bet < 0 {
             return Err(PyValueError::new_err("bet cannot be negative"));
         }
-        
+
         let cell = self
             .cur
             .as_ref()
             .ok_or_else(|| PyValueError::new_err("no state"))?;
         let mut s_mut = cell.borrow_mut(py);
-        
+
         if player_idx >= s_mut.players.len() {
             return Err(PyValueError::new_err("player index out of range"));
         }
-        
+
         s_mut.players[player_idx].bet = new_bet;
-        
+
         // Update legal actions cache since bet changes affect available actions
         self.la_cache = legal_actions_bits_from_state(&s_mut);
         Ok(())
     }
 
     /// Set a player's contribution (total amount put in pot this hand).
-    fn set_player_cont(&mut self, py: Python<'_>, player_idx: usize, new_cont: i32) -> PyResult<()> {
+    fn set_player_cont(
+        &mut self,
+        py: Python<'_>,
+        player_idx: usize,
+        new_cont: i32,
+    ) -> PyResult<()> {
         if new_cont < 0 {
             return Err(PyValueError::new_err("cont cannot be negative"));
         }
-        
+
         let cell = self
             .cur
             .as_ref()
             .ok_or_else(|| PyValueError::new_err("no state"))?;
         let mut s_mut = cell.borrow_mut(py);
-        
+
         if player_idx >= s_mut.players.len() {
             return Err(PyValueError::new_err("player index out of range"));
         }
-        
+
         s_mut.players[player_idx].cont = new_cont;
         Ok(())
     }
@@ -1352,36 +1507,43 @@ impl NLHEngine {
             .as_ref()
             .ok_or_else(|| PyValueError::new_err("no state"))?;
         let mut s_mut = cell.borrow_mut(py);
-        
+
         if player_idx >= s_mut.players.len() {
             return Err(PyValueError::new_err("player index out of range"));
         }
-        
+
         s_mut.players[player_idx].rho = new_rho;
-        
+
         // Update legal actions cache since rho affects raise rights and next_to_act
         self.la_cache = legal_actions_bits_from_state(&s_mut);
         Ok(())
     }
 
     /// Set a player's status. Validates status is one of: "active", "folded", "allin".
-    fn set_player_status(&mut self, py: Python<'_>, player_idx: usize, new_status: String) -> PyResult<()> {
+    fn set_player_status(
+        &mut self,
+        py: Python<'_>,
+        player_idx: usize,
+        new_status: String,
+    ) -> PyResult<()> {
         if !["active", "folded", "allin"].contains(&new_status.as_str()) {
-            return Err(PyValueError::new_err("status must be 'active', 'folded', or 'allin'"));
+            return Err(PyValueError::new_err(
+                "status must be 'active', 'folded', or 'allin'",
+            ));
         }
-        
+
         let cell = self
             .cur
             .as_ref()
             .ok_or_else(|| PyValueError::new_err("no state"))?;
         let mut s_mut = cell.borrow_mut(py);
-        
+
         if player_idx >= s_mut.players.len() {
             return Err(PyValueError::new_err("player index out of range"));
         }
-        
-        s_mut.players[player_idx].status = new_status;
-        
+
+        s_mut.players[player_idx].status = str_to_status(&new_status);
+
         // Update legal actions cache since status changes affect available actions
         self.la_cache = legal_actions_bits_from_state(&s_mut);
         Ok(())
@@ -1395,10 +1557,10 @@ impl NLHEngine {
             .as_ref()
             .ok_or_else(|| PyValueError::new_err("no state"))?;
         let mut s_mut = cell.borrow_mut(py);
-        
+
         // Apply all updates to temporary values first, then validate
         let mut modified = false;
-        
+
         for (key, value) in updates {
             match key.as_str() {
                 "pot" => {
@@ -1407,54 +1569,58 @@ impl NLHEngine {
                     }
                     s_mut.pot = value as i32;
                     modified = true;
-                },
+                }
                 "current_bet" => {
                     if value < 0 {
                         return Err(PyValueError::new_err("current_bet cannot be negative"));
                     }
                     s_mut.current_bet = value as i32;
                     modified = true;
-                },
+                }
                 "min_raise" => {
                     if value <= 0 {
                         return Err(PyValueError::new_err("min_raise must be positive"));
                     }
                     s_mut.min_raise = value as i32;
                     modified = true;
-                },
+                }
                 "tau" => {
                     s_mut.tau = value;
                     modified = true;
-                },
+                }
                 "step_idx" => {
                     s_mut.step_idx = value;
                     modified = true;
-                },
+                }
                 _ => {
                     let err_msg = format!("unknown state variable: {}", key);
                     return Err(PyValueError::new_err(err_msg));
                 }
             }
         }
-        
+
         if modified {
             // Update legal actions cache if any state that affects it was modified
             self.la_cache = legal_actions_bits_from_state(&s_mut);
         }
-        
+
         Ok(())
     }
 
     /// Validate current state consistency and optionally fix issues.
     /// Returns warnings about inconsistencies found.
-    fn validate_and_fix_state(&mut self, py: Python<'_>, fix_issues: bool) -> PyResult<Vec<String>> {
+    fn validate_and_fix_state(
+        &mut self,
+        py: Python<'_>,
+        fix_issues: bool,
+    ) -> PyResult<Vec<String>> {
         let cell = self
             .cur
             .as_ref()
             .ok_or_else(|| PyValueError::new_err("no state"))?;
         let mut s_mut = cell.borrow_mut(py);
         let mut warnings = Vec::new();
-        
+
         // Check pot consistency
         let calculated_pot: i32 = s_mut.players.iter().map(|p| p.cont).sum();
         if s_mut.pot != calculated_pot {
@@ -1466,7 +1632,7 @@ impl NLHEngine {
                 s_mut.pot = calculated_pot;
             }
         }
-        
+
         // Check current_bet consistency
         let max_bet = s_mut.players.iter().map(|p| p.bet).max().unwrap_or(0);
         if s_mut.current_bet != max_bet {
@@ -1478,31 +1644,28 @@ impl NLHEngine {
                 s_mut.current_bet = max_bet;
             }
         }
-        
+
         // Check player status consistency
         for (idx, player) in s_mut.players.iter_mut().enumerate() {
             // Player with zero stack and positive bet should be all-in
-            if player.stack == 0 && player.bet > 0 && player.status == "active" {
+            if player.stack == 0 && player.bet > 0 && player.status == STATUS_ACTIVE {
                 warnings.push(format!(
                     "Player {} has zero stack but is marked as active",
                     idx
                 ));
                 if fix_issues {
-                    player.status = "allin".to_string();
+                    player.status = STATUS_ALLIN;
                 }
             }
-            
+
             // Player marked as all-in but has stack should be active
-            if player.stack > 0 && player.status == "allin" {
-                warnings.push(format!(
-                    "Player {} has stack but is marked as all-in",
-                    idx
-                ));
+            if player.stack > 0 && player.status == STATUS_ALLIN {
+                warnings.push(format!("Player {} has stack but is marked as all-in", idx));
                 if fix_issues {
-                    player.status = "active".to_string();
+                    player.status = STATUS_ACTIVE;
                 }
             }
-            
+
             // Negative values checks
             if player.stack < 0 {
                 warnings.push(format!(
@@ -1511,10 +1674,7 @@ impl NLHEngine {
                 ));
             }
             if player.bet < 0 {
-                warnings.push(format!(
-                    "Player {} has negative bet: {}",
-                    idx, player.bet
-                ));
+                warnings.push(format!("Player {} has negative bet: {}", idx, player.bet));
             }
             if player.cont < 0 {
                 warnings.push(format!(
@@ -1523,12 +1683,12 @@ impl NLHEngine {
                 ));
             }
         }
-        
+
         // Update legal actions cache after any fixes
         if fix_issues && !warnings.is_empty() {
             self.la_cache = legal_actions_bits_from_state(&s_mut);
         }
-        
+
         Ok(warnings)
     }
 
@@ -1538,115 +1698,137 @@ impl NLHEngine {
         // Validate card range
         for &card in &new_board {
             if card > 51 {
-                return Err(PyValueError::new_err(format!("invalid card value: {}", card)));
+                return Err(PyValueError::new_err(format!(
+                    "invalid card value: {}",
+                    card
+                )));
             }
         }
-        
+
         // Check for duplicates in board
         let mut seen = HashSet::new();
         for &card in &new_board {
             if !seen.insert(card) {
-                return Err(PyValueError::new_err(format!("duplicate card in board: {}", card)));
+                return Err(PyValueError::new_err(format!(
+                    "duplicate card in board: {}",
+                    card
+                )));
             }
         }
-        
+
         let cell = self
             .cur
             .as_ref()
             .ok_or_else(|| PyValueError::new_err("no state"))?;
         let mut s_mut = cell.borrow_mut(py);
-        
+
         // Check for conflicts with existing hole cards
         for player in &s_mut.players {
             if let Some((c1, c2)) = player.hole {
                 if new_board.contains(&c1) {
-                    return Err(PyValueError::new_err(format!("board conflicts with player hole card: {}", c1)));
+                    return Err(PyValueError::new_err(format!(
+                        "board conflicts with player hole card: {}",
+                        c1
+                    )));
                 }
                 if new_board.contains(&c2) {
-                    return Err(PyValueError::new_err(format!("board conflicts with player hole card: {}", c2)));
+                    return Err(PyValueError::new_err(format!(
+                        "board conflicts with player hole card: {}",
+                        c2
+                    )));
                 }
             }
         }
-        
+
         // Update board
         s_mut.board = new_board.clone();
-        
+
         // Update undealt deck - remove board cards and all hole cards
         let mut used_cards = HashSet::new();
         used_cards.extend(&new_board);
-        
+
         for player in &s_mut.players {
             if let Some((c1, c2)) = player.hole {
                 used_cards.insert(c1);
                 used_cards.insert(c2);
             }
         }
-        
+
         s_mut.undealt = (0u8..52u8)
             .filter(|card| !used_cards.contains(card))
             .collect();
-        
+
         Ok(())
     }
 
     /// Set a player's hole cards. Validates cards are in range, no duplicates, and no conflicts.
-    fn set_player_hole(&mut self, py: Python<'_>, player_idx: usize, hole_cards: Option<(u8, u8)>) -> PyResult<()> {
+    fn set_player_hole(
+        &mut self,
+        py: Python<'_>,
+        player_idx: usize,
+        hole_cards: Option<(u8, u8)>,
+    ) -> PyResult<()> {
         let cell = self
             .cur
             .as_ref()
             .ok_or_else(|| PyValueError::new_err("no state"))?;
         let mut s_mut = cell.borrow_mut(py);
-        
+
         if player_idx >= s_mut.players.len() {
             return Err(PyValueError::new_err("player index out of range"));
         }
-        
+
         if let Some((c1, c2)) = hole_cards {
             // Validate card range
             if c1 > 51 || c2 > 51 {
                 return Err(PyValueError::new_err("invalid card value (must be 0-51)"));
             }
-            
+
             // Check for duplicate cards in this player's hand
             if c1 == c2 {
-                return Err(PyValueError::new_err("player cannot have duplicate hole cards"));
+                return Err(PyValueError::new_err(
+                    "player cannot have duplicate hole cards",
+                ));
             }
-            
+
             // Check for conflicts with board
             if s_mut.board.contains(&c1) || s_mut.board.contains(&c2) {
                 return Err(PyValueError::new_err("hole card conflicts with board"));
             }
-            
+
             // Check for conflicts with other players' hole cards
             for (idx, player) in s_mut.players.iter().enumerate() {
                 if idx != player_idx {
                     if let Some((other_c1, other_c2)) = player.hole {
                         if c1 == other_c1 || c1 == other_c2 || c2 == other_c1 || c2 == other_c2 {
-                            return Err(PyValueError::new_err(format!("hole card conflicts with player {}", idx)));
+                            return Err(PyValueError::new_err(format!(
+                                "hole card conflicts with player {}",
+                                idx
+                            )));
                         }
                     }
                 }
             }
         }
-        
+
         // Update player's hole cards
         s_mut.players[player_idx].hole = hole_cards;
-        
+
         // Update undealt deck
         let mut used_cards = HashSet::new();
         used_cards.extend(&s_mut.board);
-        
+
         for player in &s_mut.players {
             if let Some((c1, c2)) = player.hole {
                 used_cards.insert(c1);
                 used_cards.insert(c2);
             }
         }
-        
+
         s_mut.undealt = (0u8..52u8)
             .filter(|card| !used_cards.contains(card))
             .collect();
-        
+
         Ok(())
     }
 
@@ -1656,82 +1838,105 @@ impl NLHEngine {
         // Validate card range
         for &card in &new_undealt {
             if card > 51 {
-                return Err(PyValueError::new_err(format!("invalid card value: {}", card)));
+                return Err(PyValueError::new_err(format!(
+                    "invalid card value: {}",
+                    card
+                )));
             }
         }
-        
+
         // Check for duplicates in undealt
         let mut seen = HashSet::new();
         for &card in &new_undealt {
             if !seen.insert(card) {
-                return Err(PyValueError::new_err(format!("duplicate card in undealt: {}", card)));
+                return Err(PyValueError::new_err(format!(
+                    "duplicate card in undealt: {}",
+                    card
+                )));
             }
         }
-        
+
         let cell = self
             .cur
             .as_ref()
             .ok_or_else(|| PyValueError::new_err("no state"))?;
         let mut s_mut = cell.borrow_mut(py);
-        
+
         // Check for conflicts with board and hole cards
         let mut used_cards = HashSet::new();
         used_cards.extend(&s_mut.board);
-        
+
         for player in &s_mut.players {
             if let Some((c1, c2)) = player.hole {
                 used_cards.insert(c1);
                 used_cards.insert(c2);
             }
         }
-        
+
         for &card in &new_undealt {
             if used_cards.contains(&card) {
-                return Err(PyValueError::new_err(format!("undealt card {} conflicts with cards in play", card)));
+                return Err(PyValueError::new_err(format!(
+                    "undealt card {} conflicts with cards in play",
+                    card
+                )));
             }
         }
-        
+
         s_mut.undealt = new_undealt;
         Ok(())
     }
 
     /// Convenience method to set up a complete card scenario with board, hole cards, and remaining deck.
     /// This ensures all cards are properly distributed with no conflicts.
-    fn set_card_scenario(&mut self, py: Python<'_>, 
-                        board: Vec<u8>, 
-                        hole_cards: Vec<Option<(u8, u8)>>, 
-                        undealt: Option<Vec<u8>>) -> PyResult<()> {
+    fn set_card_scenario(
+        &mut self,
+        py: Python<'_>,
+        board: Vec<u8>,
+        hole_cards: Vec<Option<(u8, u8)>>,
+        undealt: Option<Vec<u8>>,
+    ) -> PyResult<()> {
         let cell = self
             .cur
             .as_ref()
             .ok_or_else(|| PyValueError::new_err("no state"))?;
         let mut s_mut = cell.borrow_mut(py);
-        
+
         if hole_cards.len() != s_mut.players.len() {
-            return Err(PyValueError::new_err("hole_cards length must match number of players"));
+            return Err(PyValueError::new_err(
+                "hole_cards length must match number of players",
+            ));
         }
-        
+
         // Collect all cards that will be used
         let mut used_cards = HashSet::new();
-        
+
         // Validate and collect board cards
         for &card in &board {
             if card > 51 {
-                return Err(PyValueError::new_err(format!("invalid board card: {}", card)));
+                return Err(PyValueError::new_err(format!(
+                    "invalid board card: {}",
+                    card
+                )));
             }
             if !used_cards.insert(card) {
                 return Err(PyValueError::new_err(format!("duplicate card: {}", card)));
             }
         }
-        
+
         // Validate and collect hole cards
         for (idx, hole) in hole_cards.iter().enumerate() {
             if let Some((c1, c2)) = hole {
                 if *c1 > 51 || *c2 > 51 {
-                    return Err(PyValueError::new_err(format!("invalid hole card for player {}", idx)));
+                    return Err(PyValueError::new_err(format!(
+                        "invalid hole card for player {}",
+                        idx
+                    )));
                 }
                 if c1 == c2 {
-                    return Err(PyValueError::new_err(format!("player {} cannot have duplicate hole cards", idx)));
+                    return Err(PyValueError::new_err(format!(
+                        "player {} cannot have duplicate hole cards",
+                        idx
+                    )));
                 }
                 if !used_cards.insert(*c1) {
                     return Err(PyValueError::new_err(format!("duplicate card: {}", c1)));
@@ -1741,27 +1946,36 @@ impl NLHEngine {
                 }
             }
         }
-        
+
         // Handle undealt cards
         let final_undealt = if let Some(undealt_cards) = undealt {
             // Validate provided undealt cards
             for &card in &undealt_cards {
                 if card > 51 {
-                    return Err(PyValueError::new_err(format!("invalid undealt card: {}", card)));
+                    return Err(PyValueError::new_err(format!(
+                        "invalid undealt card: {}",
+                        card
+                    )));
                 }
                 if used_cards.contains(&card) {
-                    return Err(PyValueError::new_err(format!("undealt card {} conflicts with cards in play", card)));
+                    return Err(PyValueError::new_err(format!(
+                        "undealt card {} conflicts with cards in play",
+                        card
+                    )));
                 }
             }
-            
+
             // Check for duplicates in undealt
             let mut seen = HashSet::new();
             for &card in &undealt_cards {
                 if !seen.insert(card) {
-                    return Err(PyValueError::new_err(format!("duplicate card in undealt: {}", card)));
+                    return Err(PyValueError::new_err(format!(
+                        "duplicate card in undealt: {}",
+                        card
+                    )));
                 }
             }
-            
+
             undealt_cards
         } else {
             // Auto-generate remaining undealt cards
@@ -1769,14 +1983,14 @@ impl NLHEngine {
                 .filter(|card| !used_cards.contains(card))
                 .collect()
         };
-        
+
         // Apply all changes
         s_mut.board = board;
         for (idx, hole) in hole_cards.into_iter().enumerate() {
             s_mut.players[idx].hole = hole;
         }
         s_mut.undealt = final_undealt;
-        
+
         Ok(())
     }
 }
@@ -1784,63 +1998,58 @@ impl NLHEngine {
 // ---- reset_hand for NLHEngine (mutates self.cur only through return) ----
 impl NLHEngine {
     fn reset_hand_internal(&mut self, button: usize) -> PyResult<GameState> {
-        let mut deck = make_deck();
-        // Fisher–Yates
-        for i in (1..deck.len()).rev() {
+        let deck = &mut self.deck;
+        for i in (1..52).rev() {
             let j = self.rng.gen_range(0..=i);
             deck.swap(i, j);
         }
-        let mut players: Vec<PlayerState> = (0..self.n)
-            .map(|_| PlayerState {
-                hole: None,
-                stack: self.start_stack,
-                bet: 0,
-                cont: 0,
-                status: "active".into(),
-                rho: -1_000_000_000,
-            })
-            .collect();
-
+        let template = PlayerState {
+            hole: None,
+            stack: self.start_stack,
+            bet: 0,
+            cont: 0,
+            status: STATUS_ACTIVE,
+            rho: -1_000_000_000,
+        };
+        let mut players: [PlayerState; 6] = core::array::from_fn(|_| template.clone());
+        let mut undealt_idx = 52usize;
         for i in 0..self.n {
-            let c1 = deck
-                .pop()
-                .ok_or_else(|| PyValueError::new_err("deck underflow"))?;
-            let c2 = deck
-                .pop()
-                .ok_or_else(|| PyValueError::new_err("deck underflow"))?;
+            undealt_idx -= 1;
+            let c1 = deck[undealt_idx];
+            undealt_idx -= 1;
+            let c2 = deck[undealt_idx];
             players[i].hole = Some((c1, c2));
         }
-
-        let board: Vec<u8> = Vec::new();
-        let undealt = deck.clone();
+        let board: Vec<u8> = Vec::with_capacity(5);
+        let undealt = deck[..undealt_idx].to_vec();
 
         // blinds
         let sb_seat = (button + 1) % self.n;
         let bb_seat = (button + 2) % self.n;
         let sb_amt = self.sb.min(players[sb_seat].stack);
         players[sb_seat].stack -= sb_amt;
-        players[sb_seat].bet += sb_amt;
-        players[sb_seat].cont += sb_amt;
+        players[sb_seat].bet = sb_amt;
+        players[sb_seat].cont = sb_amt;
         if players[sb_seat].stack == 0 && sb_amt > 0 {
-            players[sb_seat].status = "allin".into();
+            players[sb_seat].status = STATUS_ALLIN;
         }
         let bb_amt = self.bb.min(players[bb_seat].stack);
         players[bb_seat].stack -= bb_amt;
-        players[bb_seat].bet += bb_amt;
-        players[bb_seat].cont += bb_amt;
+        players[bb_seat].bet = bb_amt;
+        players[bb_seat].cont = bb_amt;
         if players[bb_seat].stack == 0 && bb_amt > 0 {
-            players[bb_seat].status = "allin".into();
+            players[bb_seat].status = STATUS_ALLIN;
         }
 
         let current_bet = self.bb;
-        let pot: i32 = players.iter().map(|p| p.cont).sum();
+        let pot = sb_amt + bb_amt;
 
         Ok(GameState {
             button,
-            round_label: "Preflop".into(),
+            round: ROUND_PREFLOP,
             board,
             undealt,
-            players,
+            players: Vec::from(players),
             current_bet,
             min_raise: self.bb,
             tau: 0,
@@ -1849,7 +2058,7 @@ impl NLHEngine {
             pot,
             sb: self.sb,
             bb: self.bb,
-            actions_log: vec![],
+            actions_log: Vec::with_capacity(64),
         })
     }
 
@@ -1862,40 +2071,12 @@ impl NLHEngine {
         let i = s
             .next_to_act
             .ok_or_else(|| PyValueError::new_err("no next_to_act"))?;
-        if s.players[i].status != "active" {
+        if s.players[i].status != STATUS_ACTIVE {
             return Err(PyValueError::new_err("player not active"));
         }
         s.step_idx += 1;
 
         let mut changed: u64 = 0;
-
-        let advance_next = |s: &mut GameState, i: usize, n: usize| {
-            let mut j = (i + 1) % n;
-            for _ in 0..n {
-                let pj = &s.players[j];
-                if pj.status == "active" {
-                    let owej = (s.current_bet - pj.bet).max(0);
-                    if pj.rho < s.tau || owej > 0 {
-                        s.next_to_act = Some(j);
-                        return;
-                    }
-                }
-                j = (j + 1) % n;
-            }
-            s.next_to_act = None;
-        };
-        let add_chips = |s: &mut GameState, idx: usize, amount: i32| -> PyResult<()> {
-            if amount < 0 {
-                return Err(PyValueError::new_err("negative amount"));
-            }
-            if s.players[idx].stack < amount {
-                return Err(PyValueError::new_err("insufficient stack"));
-            }
-            s.players[idx].stack -= amount;
-            s.players[idx].bet += amount;
-            s.players[idx].cont += amount;
-            Ok(())
-        };
 
         let owe = (s.current_bet - s.players[i].bet).max(0);
         let b_old = s.current_bet;
@@ -1904,9 +2085,9 @@ impl NLHEngine {
             0 => {
                 // FOLD
                 changed |= 1 << i;
-                s.players[i].status = "folded".into();
+                s.players[i].status = STATUS_FOLDED;
                 s.players[i].rho = s.step_idx;
-                advance_next(s, i, n);
+                advance_next_player(n, s, i);
             }
             1 => {
                 // CHECK
@@ -1915,7 +2096,7 @@ impl NLHEngine {
                 }
                 changed |= 1 << i;
                 s.players[i].rho = s.step_idx;
-                advance_next(s, i, n);
+                advance_next_player(n, s, i);
             }
             2 => {
                 // CALL
@@ -1926,10 +2107,10 @@ impl NLHEngine {
                 let call_amt = owe.min(s.players[i].stack);
                 add_chips(s, i, call_amt)?;
                 if s.players[i].stack == 0 {
-                    s.players[i].status = "allin".into();
+                    s.players[i].status = STATUS_ALLIN;
                 }
                 s.players[i].rho = s.step_idx;
-                advance_next(s, i, n);
+                advance_next_player(n, s, i);
             }
             3 => {
                 // RAISE_TO
@@ -1960,7 +2141,7 @@ impl NLHEngine {
                 let delta = raise_to - s.players[i].bet;
                 add_chips(s, i, delta)?;
                 if s.players[i].stack == 0 {
-                    s.players[i].status = "allin".into();
+                    s.players[i].status = STATUS_ALLIN;
                 }
                 s.current_bet = raise_to;
                 s.players[i].rho = s.step_idx;
@@ -1969,29 +2150,25 @@ impl NLHEngine {
                     s.tau = s.step_idx;
                     s.min_raise = full_inc;
                     for j in 0..n {
-                        if j != i && s.players[j].status == "active" {
+                        if j != i && s.players[j].status == STATUS_ACTIVE {
                             changed |= 1 << j;
                             s.players[j].rho = -1_000_000_000;
                         }
                     }
                 }
-                advance_next(s, i, n);
+                advance_next_player(n, s, i);
             }
             _ => return Err(PyValueError::new_err("unknown action type")),
         }
 
         // log
         let aid = a.kind as i32;
-        let rid = round_label_id(&s.round_label);
+        let rid = s.round as i32;
         let mut log_amt = 0i32;
         if a.kind == 3 {
             log_amt = s.current_bet;
         }
         s.actions_log.push((i, aid, log_amt, rid));
-
-        // recompute pot/current_bet
-        s.pot = s.players.iter().map(|pl| pl.cont).sum();
-        s.current_bet = s.players.iter().map(|pl| pl.bet).max().unwrap_or(0);
 
         let (done, rewards, round_reset_mask) = advance_round_if_needed_internal(n, s)?;
         // Merge the round reset changes with action-specific changes

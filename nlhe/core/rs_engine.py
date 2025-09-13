@@ -70,8 +70,9 @@ class NLHEngine:
             self._mask_cache[m] = tuple(lst)   # tuple = immutable, no per-call allocation of Actions
         # reusable LegalActionInfo (we just mutate its fields)
         self._la_reusable = PyLegalActionInfo(actions=[], min_raise_to=None, max_raise_to=None, has_raise_right=None)
-        
+
         self._state = None
+        self._empty_info: Dict[str, Any] = {}
 
     def reset_hand(self, button: int = 0):
         if self._state is None:
@@ -100,7 +101,7 @@ class NLHEngine:
         kind = _ACTION_ID[a.kind]
         amt = None if a.amount is None else int(a.amount)
         done, rewards = self._rs.step_apply_py_raw(s, kind, amt)
-        return s, bool(done), (None if rewards is None else [int(x) for x in rewards]), {}
+        return s, bool(done), (None if rewards is None else [int(x) for x in rewards]), self._empty_info
 
     def advance_round_if_needed(self, s) -> Tuple[bool, Optional[List[int]]]:
         done, rewards = self._rs.advance_round_if_needed_apply_py(s)
