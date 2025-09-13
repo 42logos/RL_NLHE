@@ -104,14 +104,32 @@ def _build_with_cargo(crate_dir: Path, crate_name: str, release: bool) -> None:
     print(f"Copied {artifact} -> {dest}")
 
 
-def _build_with_maturin(crate_dir: Path, release: bool) -> None:
-    """Build the crate using ``maturin develop``."""
+def _build_with_maturin(crate_dir: Path, crate_name: str, release: bool) -> None:
+    """Build the crate using ``maturin develop`` and patch ``__init__``.
+
+    On Windows ``maturin`` generates an ``__init__`` that references the
+    extension module without importing it, leading to ``NameError`` during
+    runtime.  After ``maturin develop`` finishes we rewrite the package's
+    ``__init__`` to import the module explicitly so the attribute lookup
+    succeeds consistently across platforms.
+    """
 
     cmd = [sys.executable, "-m", "maturin", "develop"]
     if release:
         cmd.append("--release")
     cmd.extend(["-m", str(crate_dir / "Cargo.toml")])
     _run(cmd, cwd=crate_dir)
+
+    site_packages = Path(sysconfig.get_paths()["platlib"])
+    pkg_dir = site_packages / crate_name
+    init_py = pkg_dir / "__init__.py"
+    if init_py.exists():
+        init_py.write_text(
+            f"from . import {crate_name} as _lib\n"
+            f"from .{crate_name} import *\n"
+            f"__all__ = getattr(_lib, '__all__', [])\n"
+            f"__doc__ = _lib.__doc__\n"
+        )
 
 
 def _verify_import(crate_name: str) -> None:
@@ -189,7 +207,7 @@ def main() -> None:
         crate_name = _parse_crate_name(crate_dir)
 
         if args.backend == "maturin":
-            _build_with_maturin(crate_dir, args.release)
+            _build_with_maturin(crate_dir, crate_name, args.release)
         else:
             _build_with_cargo(crate_dir, crate_name, args.release)
 
