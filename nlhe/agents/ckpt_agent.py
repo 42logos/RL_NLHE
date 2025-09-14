@@ -120,14 +120,14 @@ class CKPTAgent(Agent):
         }
 
     # -------- Action mapping (legal-aware) --------
-    def _map_action(self, env: EngineLike, s: GameState, seat: int, a: Dict[str, Any]) -> Action:
-        info = env.legal_actions(s)
+    def _map_action(self, engine: EngineLike, state: GameState, seat: int, a: Dict[str, Any]) -> Action:
+        info = engine.legal_actions(state)
         atype = int(a.get("atype", 1))
         r = float(a.get("r", 0.0))
         r = max(0.0, min(1.0, r))  # clamp
 
         acts = getattr(info, "actions", [])
-        owe = env.owed(s, seat)
+        owe = engine.owed(state, seat)
 
         def has(kind: ActionType) -> bool:
             return any(x.kind == kind for x in acts)
@@ -139,14 +139,14 @@ class CKPTAgent(Agent):
         if atype == 2 and has(ActionType.CALL) and owe > 0:
             return Action(ActionType.CALL)
         if atype == 3 and any(x.kind == ActionType.RAISE_TO for x in acts):
-            min_to = getattr(info, "min_raise_to", s.current_bet)
-            max_to = getattr(info, "max_raise_to", s.current_bet)
+            min_to = getattr(info, "min_raise_to", state.current_bet)
+            max_to = getattr(info, "max_raise_to", state.current_bet)
             has_rr = getattr(info, "has_raise_right", False)
             if (not has_rr) or (max_to < min_to):
                 return Action(ActionType.RAISE_TO, amount=max_to)
             target = int(round(min_to + r * (max_to - min_to)))
             target = max(min_to, min(target, max_to))
-            if target <= s.current_bet:
+            if target <= state.current_bet:
                 target = min_to
             return Action(ActionType.RAISE_TO, amount=target)
 
@@ -159,7 +159,7 @@ class CKPTAgent(Agent):
             return Action(ActionType.FOLD)
         for x in acts:
             if x.kind == ActionType.RAISE_TO:
-                return Action(ActionType.RAISE_TO, amount=getattr(info, "min_raise_to", s.current_bet + s.min_raise))
+                return Action(ActionType.RAISE_TO, amount=getattr(info, "min_raise_to", state.current_bet + state.min_raise))
         return Action(ActionType.CHECK)
 
     # -------- Public API --------
@@ -167,9 +167,9 @@ class CKPTAgent(Agent):
         """Reset RNN state for a seat (e.g., on new episode)."""
         self._rnn_state.pop(seat, None)
 
-    def act(self, env: EngineLike, s: GameState, seat: int) -> Action:
+    def act(self, engine: EngineLike, state: GameState, seat: int) -> Action:
         # 1) Build raw observation and flatten to EXACT train/eval layout
-        obs_raw = self._obs_from_state(s, seat)
+        obs_raw = self._obs_from_state(state, seat)
         obs_flat = self.flattener.transform(obs_raw)  # np.float32 [F]
         obs_t = torch.as_tensor(obs_flat, dtype=torch.float32, device=self._device).unsqueeze(0)  # [1, F]
 
@@ -221,4 +221,4 @@ class CKPTAgent(Agent):
             atype = int(arr[0].item())
             r = float(arr[1].item()) if arr.numel() > 1 else 0.0
 
-        return self._map_action(env, s, seat, {"atype": atype, "r": r})
+        return self._map_action(engine, state, seat, {"atype": atype, "r": r})

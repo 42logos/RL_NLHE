@@ -6,6 +6,7 @@ import gymnasium as gym
 from gymnasium import spaces
 from ..core.rs_engine import NLHEngine
 from ..core.types import Action, ActionType, GameState
+from ..agents.base import Agent
 from ..agents.tamed_random import TamedRandomAgent
 
 class NLHEParamEnv:
@@ -15,7 +16,7 @@ class NLHEParamEnv:
         self.rng = random.Random(seed)
         self.hero = hero_seat
         self.engine = NLHEngine(sb=sb, bb=bb, start_stack=start_stack, rng=self.rng)
-        self.agents = [TamedRandomAgent(self.rng) for _ in range(self.engine.N)]
+        self.agents: List[Agent | None] = [TamedRandomAgent(self.rng) for _ in range(self.engine.N)]
         self.agents[self.hero] = None  # type: ignore
         self._state: Optional[GameState] = None
         self.H = history_len

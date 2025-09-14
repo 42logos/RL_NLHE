@@ -14,11 +14,11 @@ class TamedRandomAgent(Agent):
         self.p_raise_closed = p_raise_closed
         self.cap_raises_bb = cap_raises_bb
 
-    def act(self, env: EngineLike, s: GameState, seat: int) -> Action:
-        info = env.legal_actions(s)
+    def act(self, engine: EngineLike, state: GameState, seat: int) -> Action:
+        info = engine.legal_actions(state)
         acts: List[Action] = getattr(info, "actions", []) if hasattr(info, "actions") else info.get("actions", [])
         if not acts: return Action(ActionType.CHECK)
-        owe = env.owed(s, seat)
+        owe = engine.owed(state, seat)
 
         def has(kind: ActionType) -> bool:
             return any(a.kind == kind for a in acts)
@@ -31,14 +31,14 @@ class TamedRandomAgent(Agent):
                 return Action(ActionType.CHECK)
             for a in acts:
                 if a.kind == ActionType.RAISE_TO:
-                    min_to = getattr(info, "min_raise_to", s.current_bet)
-                    max_to = getattr(info, "max_raise_to", s.current_bet)
+                    min_to = getattr(info, "min_raise_to", state.current_bet)
+                    max_to = getattr(info, "max_raise_to", state.current_bet)
                     has_rr = getattr(info, "has_raise_right", False)
                     if short_only_or_closed(min_to, max_to, has_rr):
                         if self.rng.random() < self.p_raise_closed:
                             return Action(ActionType.RAISE_TO, amount=max_to)
                         return Action(ActionType.CHECK) if has(ActionType.CHECK) else (Action(ActionType.CALL) if has(ActionType.CALL) else acts[0])
-                    cap = min(max_to, max(min_to, s.current_bet) + self.cap_raises_bb * s.bb)
+                    cap = min(max_to, max(min_to, state.current_bet) + self.cap_raises_bb * state.bb)
                     cap = max(cap, min_to)
                     target = min_to if (self.rng.random() < 0.8 or cap == min_to) else self.rng.randint(min_to, cap)
                     return Action(ActionType.RAISE_TO, amount=target)
@@ -48,8 +48,8 @@ class TamedRandomAgent(Agent):
                 return Action(ActionType.CALL)
             for a in acts:
                 if a.kind == ActionType.RAISE_TO:
-                    min_to = getattr(info, "min_raise_to", s.current_bet)
-                    max_to = getattr(info, "max_raise_to", s.current_bet)
+                    min_to = getattr(info, "min_raise_to", state.current_bet)
+                    max_to = getattr(info, "max_raise_to", state.current_bet)
                     has_rr = getattr(info, "has_raise_right", False)
                     if short_only_or_closed(min_to, max_to, has_rr):
                         if self.rng.random() < self.p_raise_closed:
@@ -57,8 +57,8 @@ class TamedRandomAgent(Agent):
                         if has(ActionType.CALL): return Action(ActionType.CALL)
                         if has(ActionType.FOLD): return Action(ActionType.FOLD)
                         break
-                    cap = min(max_to, s.current_bet + self.cap_raises_bb * s.bb)
-                    if cap <= s.current_bet:
+                    cap = min(max_to, state.current_bet + self.cap_raises_bb * state.bb)
+                    if cap <= state.current_bet:
                         return Action(ActionType.CALL) if has(ActionType.CALL) else (Action(ActionType.FOLD) if has(ActionType.FOLD) else acts[0])
                     if self.rng.random() < self.p_allin:
                         return Action(ActionType.RAISE_TO, amount=max_to)
