@@ -5,6 +5,7 @@ from typing import List, Optional
 
 from PyQt6 import QtCore
 
+from ..agents.base import Agent
 from ..agents.tamed_random import TamedRandomAgent
 # from ..agents.ckpt_agent import CKPTAgent
 from ..core.engine import NLHEngine
@@ -31,7 +32,7 @@ class GameController(QtCore.QObject):
         self.seed_val = seed
         self.rng = random.Random(seed)
         self.engine = NLHEngine(sb=1, bb=2, start_stack=100, rng=self.rng)
-        self.agents: List[TamedRandomAgent | CKPTAgent | None] = [
+        self.agents: List[Agent | None] = [
             TamedRandomAgent(self.rng) for _ in range(self.engine.N)
         ]
         self.agents[hero_seat] = None  # human
